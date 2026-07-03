@@ -29,3 +29,19 @@ export async function sendPing(traceId: string, sessionId: string) {
   }
   return response.json();
 }
+
+export async function connectRead(traceId: string, sessionId: string) {
+  const response = await fetch("/api/phase1/connect-read", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "X-Trace-Id": traceId,
+      "X-Session-Id": sessionId,
+    },
+    body: JSON.stringify({}),
+  });
+  if (!response.ok) {
+    throw new Error(`connect-read failed: ${response.status}`);
+  }
+  return response.json();
+}
