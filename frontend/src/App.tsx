@@ -116,7 +116,7 @@ export default function App() {
 
   useEffect(() => {
     const wsProtocol = window.location.protocol === "https:" ? "wss" : "ws";
-    const socket = new WebSocket(`${wsProtocol}://${window.location.hostname}:8000/ws/logs`);
+    const socket = new WebSocket(`${wsProtocol}://${window.location.host}/ws/logs`);
     socket.onmessage = (event) => {
       const item = JSON.parse(event.data) as LogItem;
       setLogs((current) => [...current, item].slice(-200));
