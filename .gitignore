@@ -15,6 +15,7 @@ frontend/dist/
 backend/.venv/
 backend/.pytest_cache/
 backend/.ruff_cache/
+backend/*.egg-info/
 bridge/bin/
 bridge/.cache/
 *.log
