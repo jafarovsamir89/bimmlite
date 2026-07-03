@@ -27,6 +27,10 @@ func formatU16(v uint16) string {
 	return fmt.Sprintf("%04X", v)
 }
 
+func formatU8(v uint8) string {
+	return fmt.Sprintf("%02X", v)
+}
+
 func parseMaybeHexU16(value any) (uint16, error) {
 	switch v := value.(type) {
 	case string:

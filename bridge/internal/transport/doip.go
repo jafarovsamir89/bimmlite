@@ -13,22 +13,21 @@ import (
 )
 
 const (
-	doipVersion          = 0x02
-	doipPayloadDiagMsg   = 0x8001
-	doipPayloadRouting    = 0x0005
-	doipPayloadVehicleID  = 0x0001
-	doipPayloadAliveCheck = 0x0007
+	doipVersion         = 0x02
+	doipPayloadDiagMsg  = 0x8001
+	doipPayloadRouting   = 0x0005
+	doipPayloadVehicleID = 0x0001
+	doipPayloadVinResp   = 0x0004
 )
 
 type DoIPTransport struct {
-	host      string
-	port      int
-	source    uint16
-	target    uint16
-	sink      FrameSink
-	conn      net.Conn
-	mu        sync.Mutex
-	lastSeen  time.Time
+	host   string
+	port   int
+	source uint16
+	target uint16
+	sink   FrameSink
+	conn   net.Conn
+	mu     sync.Mutex
 }
 
 func NewDoIPTransport(host string) *DoIPTransport {
@@ -36,7 +35,7 @@ func NewDoIPTransport(host string) *DoIPTransport {
 		host:   host,
 		port:   13400,
 		source: 0x0E00,
-		target: 0x0001,
+		target: 0x0010,
 	}
 }
 
@@ -70,16 +69,22 @@ func (t *DoIPTransport) Connect(ctx context.Context) error {
 func (t *DoIPTransport) routingActivation(ctx context.Context) error {
 	payload := make([]byte, 7)
 	binary.BigEndian.PutUint16(payload[0:2], t.source)
-	payload[2] = 0x00
-	payload[3] = 0x00
-	payload[4] = 0x00
-	payload[5] = 0x00
-	payload[6] = 0x00
-	if err := t.writeMessage(ctx, doipPayloadRouting, payload, "routing.activation"); err != nil {
+	// Activation type and reserved bytes stay zero for a basic read-only session.
+	if err := t.writeMessage(ctx, doipPayloadRouting, payload, "routing.activation", t.source, 0); err != nil {
 		return err
 	}
-	_, _, err := t.readMessage(ctx)
-	return err
+
+	msgType, resp, err := t.readMessage(ctx)
+	if err != nil {
+		return err
+	}
+	if msgType != 0x0006 {
+		return fmt.Errorf("unexpected routing activation response type 0x%04X", msgType)
+	}
+	if len(resp) == 0 || resp[0] != 0x10 {
+		return fmt.Errorf("routing activation failed: %X", resp)
+	}
+	return nil
 }
 
 func (t *DoIPTransport) Discover(ctx context.Context) (DiscoveryResult, error) {
@@ -87,49 +92,78 @@ func (t *DoIPTransport) Discover(ctx context.Context) (DiscoveryResult, error) {
 		return DiscoveryResult{}, err
 	}
 
-	vin, battery, err := t.readVehicleIdentity(ctx)
+	vin, battery, err := t.identifyVehicle(ctx)
 	if err != nil {
 		return DiscoveryResult{Protocol: t.Name(), ECUs: []ECUInfo{}}, err
 	}
-
 	return DiscoveryResult{
 		Protocol:       t.Name(),
 		VIN:            vin,
-		BatteryVoltage:  battery,
+		BatteryVoltage: battery,
 		ECUs:           []ECUInfo{},
 		TargetAddress:  formatU16(t.target),
 		SessionControl: "0x03",
 	}, nil
 }
 
-func (t *DoIPTransport) readVehicleIdentity(ctx context.Context) (string, float64, error) {
-	uds := []byte{0x22, 0xF1, 0x90}
-	resp, err := t.request(ctx, t.target, uds, "connect.discover")
+func (t *DoIPTransport) identifyVehicle(ctx context.Context) (string, float64, error) {
+	msgType, resp, err := t.requestVehicleIdentification(ctx)
 	if err != nil {
 		return "", 0, err
 	}
-	if len(resp) < 3 || resp[0] != 0x62 || resp[1] != 0xF1 || resp[2] != 0x90 {
-		return "", 0, fmt.Errorf("unexpected VIN response: %X", resp)
+	if msgType != doipPayloadVinResp || len(resp) < 19 {
+		return "", 0, fmt.Errorf("unexpected vehicle id response type 0x%04X payload=%X", msgType, resp)
 	}
-	return strings.TrimSpace(string(resp[3:])), 0, nil
+
+	vin := strings.TrimSpace(string(resp[:17]))
+	logicalAddress := binary.BigEndian.Uint16(resp[17:19])
+	if logicalAddress != 0 {
+		t.target = logicalAddress
+	}
+
+	battery, _ := t.readBatteryVoltage(ctx, t.target)
+	return vin, battery, nil
+}
+
+func (t *DoIPTransport) requestVehicleIdentification(ctx context.Context) (uint16, []byte, error) {
+	if err := t.writeMessage(ctx, doipPayloadVehicleID, nil, "connect.discover.identify", 0, 0); err != nil {
+		return 0, nil, err
+	}
+	msgType, payload, err := t.readMessage(ctx)
+	return msgType, payload, err
+}
+
+func (t *DoIPTransport) readBatteryVoltage(ctx context.Context, target uint16) (float64, error) {
+	resp, err := t.request(ctx, target, []byte{0x22, 0xDA, 0xD8}, "vehicle.battery")
+	if err == nil && len(resp) >= 5 && resp[0] == 0x62 && resp[1] == 0xDA && resp[2] == 0xD8 {
+		raw := uint16(resp[len(resp)-2])<<8 | uint16(resp[len(resp)-1])
+		if raw >= 80 && raw <= 170 {
+			return float64(raw) / 10, nil
+		}
+	}
+
+	resp, err = t.request(ctx, target, []byte{0x22, 0xF1, 0x01}, "vehicle.battery.fallback")
+	if err != nil || len(resp) < 5 || resp[0] != 0x62 || resp[1] != 0xF1 || resp[2] != 0x01 {
+		return 0, nil
+	}
+	return parseBCDVoltage(resp[3:]), nil
 }
 
 func (t *DoIPTransport) ScanECUs(ctx context.Context) ([]ECUInfo, error) {
 	if err := t.Connect(ctx); err != nil {
 		return nil, err
 	}
-	candidates := defaultECUCandidates()
-	result := make([]ECUInfo, 0, len(candidates))
-	for _, addr := range candidates {
-		uds := []byte{0x10, 0x03}
-		resp, err := t.request(ctx, addr, uds, "ecu.scan")
+
+	result := make([]ECUInfo, 0, len(bmwEcuCandidates()))
+	for _, addr := range bmwEcuCandidates() {
+		resp, err := t.request(ctx, uint16(addr), []byte{0x10, 0x03}, "ecu.scan")
 		if err != nil {
 			continue
 		}
 		if len(resp) >= 2 && resp[0] == 0x50 && resp[1] == 0x03 {
 			result = append(result, ECUInfo{
-				Address:  formatU16(addr),
-				Name:     "",
+				Address:  formatU16(uint16(addr)),
+				Name:     bmwEcuName(addr),
 				Protocol: t.Name(),
 				Present:  true,
 			})
@@ -143,14 +177,14 @@ func (t *DoIPTransport) ReadDTC(ctx context.Context, ecu ECUInfo) ([]DTCInfo, er
 	if err != nil {
 		return nil, err
 	}
-	resp, err := t.request(ctx, addr, []byte{0x19, 0x02}, "dtc.read")
+	resp, err := t.request(ctx, addr, []byte{0x19, 0x02, 0x2F}, "dtc.read")
 	if err != nil {
 		return nil, err
 	}
-	if len(resp) < 2 || resp[0] != 0x59 || resp[1] != 0x02 {
+	if len(resp) < 3 || resp[0] != 0x59 || resp[1] != 0x02 {
 		return nil, fmt.Errorf("unexpected DTC response: %X", resp)
 	}
-	return parseDTCResponse(ecu, resp[2:]), nil
+	return parseDTCResponse(ecu, resp[3:]), nil
 }
 
 func (t *DoIPTransport) ReadParameters(ctx context.Context, ecu ECUInfo, dids []string) ([]ParameterInfo, error) {
@@ -158,14 +192,14 @@ func (t *DoIPTransport) ReadParameters(ctx context.Context, ecu ECUInfo, dids []
 	if err != nil {
 		return nil, err
 	}
+
 	params := make([]ParameterInfo, 0, len(dids))
 	for _, did := range dids {
 		didBytes, err := decodeHex(did)
 		if err != nil || len(didBytes) != 2 {
 			continue
 		}
-		uds := []byte{0x22, didBytes[0], didBytes[1]}
-		resp, err := t.request(ctx, addr, uds, "params.read")
+		resp, err := t.request(ctx, addr, []byte{0x22, didBytes[0], didBytes[1]}, "params.read")
 		if err != nil {
 			continue
 		}
@@ -203,40 +237,57 @@ func (t *DoIPTransport) Close() error {
 }
 
 func (t *DoIPTransport) request(ctx context.Context, target uint16, uds []byte, message string) ([]byte, error) {
-	start := time.Now()
-	if err := t.writeDiagnostic(ctx, target, uds, message); err != nil {
+	msgType, payload, err := t.sendDiagnostic(ctx, target, uds, message)
+	if err != nil {
 		return nil, err
 	}
-	for {
-		_, payload, err := t.readMessage(ctx)
-		if err != nil {
-			return nil, err
-		}
-		if len(payload) < 4 {
-			continue
-		}
-		respTarget := binary.BigEndian.Uint16(payload[0:2])
-		respSource := binary.BigEndian.Uint16(payload[2:4])
-		_ = respTarget
-		_ = respSource
-		data := payload[4:]
-		if len(data) >= 3 && data[0] == 0x7F && data[2] == 0x78 {
-			continue
-		}
-		_ = start
-		return data, nil
+	if msgType != doipPayloadDiagMsg {
+		return nil, fmt.Errorf("unexpected message type 0x%04X", msgType)
 	}
+	if len(payload) < 4 {
+		return nil, errors.New("diagnostic payload too short")
+	}
+	data := payload[4:]
+	for len(data) >= 3 && data[0] == 0x7F {
+		switch data[2] {
+		case 0x78:
+			msgType, payload, err = t.readMessage(ctx)
+			if err != nil {
+				return nil, err
+			}
+			if msgType != doipPayloadDiagMsg || len(payload) < 4 {
+				return nil, fmt.Errorf("unexpected follow-up payload: type=0x%04X data=%X", msgType, payload)
+			}
+			data = payload[4:]
+		case 0x36, 0x37:
+			time.Sleep(11 * time.Second)
+			msgType, payload, err = t.readMessage(ctx)
+			if err != nil {
+				return nil, err
+			}
+			if msgType != doipPayloadDiagMsg || len(payload) < 4 {
+				return nil, fmt.Errorf("unexpected follow-up payload: type=0x%04X data=%X", msgType, payload)
+			}
+			data = payload[4:]
+		default:
+			return nil, fmt.Errorf("nrc 0x%02X: %X", data[2], data)
+		}
+	}
+	return data, nil
 }
 
-func (t *DoIPTransport) writeDiagnostic(ctx context.Context, target uint16, uds []byte, message string) error {
+func (t *DoIPTransport) sendDiagnostic(ctx context.Context, target uint16, uds []byte, message string) (uint16, []byte, error) {
 	payload := make([]byte, 4+len(uds))
 	binary.BigEndian.PutUint16(payload[0:2], t.source)
 	binary.BigEndian.PutUint16(payload[2:4], target)
 	copy(payload[4:], uds)
-	return t.writeMessage(ctx, doipPayloadDiagMsg, payload, message)
+	if err := t.writeMessage(ctx, doipPayloadDiagMsg, payload, message, t.source, target); err != nil {
+		return 0, nil, err
+	}
+	return doipPayloadDiagMsg, payload, nil
 }
 
-func (t *DoIPTransport) writeMessage(ctx context.Context, payloadType uint16, payload []byte, message string) error {
+func (t *DoIPTransport) writeMessage(ctx context.Context, payloadType uint16, payload []byte, message string, source uint16, target uint16) error {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	if t.conn == nil {
@@ -251,15 +302,17 @@ func (t *DoIPTransport) writeMessage(ctx context.Context, payloadType uint16, pa
 	if _, err := t.conn.Write(header); err != nil {
 		return err
 	}
-	if _, err := t.conn.Write(payload); err != nil {
-		return err
+	if len(payload) > 0 {
+		if _, err := t.conn.Write(payload); err != nil {
+			return err
+		}
 	}
 	t.emit(FrameRecord{
 		Protocol:  t.Name(),
 		Direction: "tx",
 		FrameHex:  encodeHex(append(header, payload...)),
-		Source:    formatU16(t.source),
-		Target:    formatU16(t.target),
+		Source:    formatU16(source),
+		Target:    formatU16(target),
 		Message:   message,
 	})
 	return nil
@@ -267,6 +320,9 @@ func (t *DoIPTransport) writeMessage(ctx context.Context, payloadType uint16, pa
 
 func (t *DoIPTransport) readMessage(ctx context.Context) (uint16, []byte, error) {
 	header := make([]byte, 8)
+	if err := setConnDeadline(t.conn, time.Now().Add(3*time.Second)); err != nil {
+		return 0, nil, err
+	}
 	if _, err := io.ReadFull(t.conn, header); err != nil {
 		return 0, nil, err
 	}
@@ -275,52 +331,45 @@ func (t *DoIPTransport) readMessage(ctx context.Context) (uint16, []byte, error)
 	if _, err := io.ReadFull(t.conn, payload); err != nil {
 		return 0, nil, err
 	}
+
+	var source, target uint16
+	if len(payload) >= 4 {
+		source = binary.BigEndian.Uint16(payload[0:2])
+		target = binary.BigEndian.Uint16(payload[2:4])
+	}
 	t.emit(FrameRecord{
 		Protocol:  t.Name(),
 		Direction: "rx",
 		FrameHex:  encodeHex(append(header, payload...)),
-		Source:    formatU16(t.source),
-		Target:    formatU16(t.target),
+		Source:    formatU16(source),
+		Target:    formatU16(target),
 	})
 	return binary.BigEndian.Uint16(header[2:4]), payload, nil
 }
 
-func defaultECUCandidates() []uint16 {
-	return []uint16{0x7E0, 0x7E1, 0x7E2, 0x7E3, 0x7E4, 0x7E5, 0x7E6, 0x7E7, 0x7E8, 0x7E9, 0x7EA, 0x7EB, 0x7EC, 0x7ED, 0x7EE, 0x7EF}
+func setConnDeadline(conn net.Conn, deadline time.Time) error {
+	if conn == nil {
+		return errors.New("connection not established")
+	}
+	return conn.SetReadDeadline(deadline)
 }
 
-func parseDTCResponse(ecu ECUInfo, raw []byte) []DTCInfo {
+func parseBCDVoltage(raw []byte) float64 {
 	if len(raw) == 0 {
-		return nil
+		return 0
 	}
-	var result []DTCInfo
-	for i := 0; i+3 < len(raw); i += 4 {
-		code := fmt.Sprintf("%02X%02X%02X", raw[i], raw[i+1], raw[i+2])
-		status := fmt.Sprintf("%02X", raw[i+3])
-		result = append(result, DTCInfo{
-			ECUAddress:  ecu.Address,
-			ECUName:     ecu.Name,
-			Code:        code,
-			Status:      status,
-			Description: "",
-			Raw:         encodeHex(raw[i : i+4]),
-		})
+	value := 0.0
+	multiplier := 1.0
+	for i := len(raw) - 1; i >= 0; i-- {
+		hi := int((raw[i] >> 4) & 0x0F)
+		lo := int(raw[i] & 0x0F)
+		value += float64(lo) * multiplier
+		multiplier *= 10
+		value += float64(hi) * multiplier
+		multiplier *= 10
 	}
-	return result
-}
-
-func decodeText(raw []byte) string {
-	if len(raw) == 0 {
-		return ""
+	if value > 0 {
+		return value / 10
 	}
-	b := make([]byte, 0, len(raw))
-	for _, c := range raw {
-		if c >= 0x20 && c <= 0x7E {
-			b = append(b, c)
-		}
-	}
-	if len(b) == 0 {
-		return ""
-	}
-	return string(b)
+	return 0
 }

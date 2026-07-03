@@ -15,8 +15,8 @@ import (
 type HSFZTransport struct {
 	host   string
 	port   int
-	source uint16
-	target uint16
+	source uint8
+	target uint8
 	sink   FrameSink
 	conn   net.Conn
 	mu     sync.Mutex
@@ -27,7 +27,7 @@ func NewHSFZTransport(host string) *HSFZTransport {
 		host:   host,
 		port:   6801,
 		source: 0xF4,
-		target: 0x01,
+		target: 0x10,
 	}
 }
 
@@ -61,38 +61,76 @@ func (t *HSFZTransport) Discover(ctx context.Context) (DiscoveryResult, error) {
 	if err := t.Connect(ctx); err != nil {
 		return DiscoveryResult{}, err
 	}
-	resp, err := t.request(ctx, t.target, []byte{0x22, 0xF1, 0x90}, "connect.discover")
+
+	for _, target := range []uint8{0x10, 0x40, 0xDF} {
+		vin, battery, err := t.readVehicleIdentity(ctx, target)
+		if err != nil || vin == "" {
+			continue
+		}
+		t.target = target
+		return DiscoveryResult{
+			Protocol:       t.Name(),
+			VIN:            vin,
+			BatteryVoltage: battery,
+			ECUs:           []ECUInfo{},
+			TargetAddress:   formatU8(target),
+			SessionControl:  "0x03",
+		}, nil
+	}
+
+	return DiscoveryResult{Protocol: t.Name(), ECUs: []ECUInfo{}}, errors.New("vin discovery failed")
+}
+
+func (t *HSFZTransport) readVehicleIdentity(ctx context.Context, target uint8) (string, float64, error) {
+	resp, err := t.request(ctx, target, []byte{0x22, 0xF1, 0x90}, "connect.discover.vin")
 	if err != nil {
-		return DiscoveryResult{Protocol: t.Name(), ECUs: []ECUInfo{}}, err
+		return "", 0, err
 	}
-	vin := ""
-	if len(resp) >= 3 && resp[0] == 0x62 && resp[1] == 0xF1 && resp[2] == 0x90 {
-		vin = strings.TrimSpace(string(resp[3:]))
+	if len(resp) < 3 || resp[0] != 0x62 || resp[1] != 0xF1 || resp[2] != 0x90 {
+		return "", 0, fmt.Errorf("unexpected VIN response: %X", resp)
 	}
-	return DiscoveryResult{
-		Protocol:      t.Name(),
-		VIN:           vin,
-		BatteryVoltage: 0,
-		ECUs:          []ECUInfo{},
-		TargetAddress: formatU16(t.target),
-		SessionControl: "0x03",
-	}, nil
+
+	vin := strings.TrimSpace(string(resp[3:]))
+	battery, _ := t.readBatteryVoltage(ctx, target)
+	return vin, battery, nil
+}
+
+func (t *HSFZTransport) readBatteryVoltage(ctx context.Context, target uint8) (float64, error) {
+	resp, err := t.request(ctx, target, []byte{0x22, 0xDA, 0xD8}, "vehicle.battery")
+	if err != nil {
+		return 0, err
+	}
+	if len(resp) < 5 || resp[0] != 0x62 || resp[1] != 0xDA || resp[2] != 0xD8 {
+		return 0, fmt.Errorf("unexpected battery response: %X", resp)
+	}
+
+	raw := uint16(resp[len(resp)-2])<<8 | uint16(resp[len(resp)-1])
+	if raw >= 80 && raw <= 170 {
+		return float64(raw) / 10, nil
+	}
+	return 0, nil
 }
 
 func (t *HSFZTransport) ScanECUs(ctx context.Context) ([]ECUInfo, error) {
 	if err := t.Connect(ctx); err != nil {
 		return nil, err
 	}
-	result := make([]ECUInfo, 0)
-	for _, addr := range defaultECUCandidates() {
+
+	if ecus, err := t.broadcastScan(ctx); err == nil && len(ecus) > 0 {
+		return ecus, nil
+	}
+
+	candidates := bmwEcuCandidates()
+	result := make([]ECUInfo, 0, len(candidates))
+	for _, addr := range candidates {
 		resp, err := t.request(ctx, addr, []byte{0x10, 0x03}, "ecu.scan")
 		if err != nil {
 			continue
 		}
 		if len(resp) >= 2 && resp[0] == 0x50 && resp[1] == 0x03 {
 			result = append(result, ECUInfo{
-				Address:  formatU16(addr),
-				Name:     "",
+				Address:  formatU8(addr),
+				Name:     bmwEcuName(addr),
 				Protocol: t.Name(),
 				Present:  true,
 			})
@@ -101,19 +139,59 @@ func (t *HSFZTransport) ScanECUs(ctx context.Context) ([]ECUInfo, error) {
 	return result, nil
 }
 
+func (t *HSFZTransport) broadcastScan(ctx context.Context) ([]ECUInfo, error) {
+	if err := t.writeFrame(0xDF, []byte{0x3E, 0x00, 0x01}, "ecu.scan.broadcast"); err != nil {
+		return nil, err
+	}
+
+	deadline := time.Now().Add(700 * time.Millisecond)
+	seen := map[uint8]ECUInfo{}
+	for time.Now().Before(deadline) {
+		_ = t.conn.SetReadDeadline(time.Now().Add(150 * time.Millisecond))
+		source, _, data, err := t.readFrame()
+		if err != nil {
+			if ne, ok := err.(net.Error); ok && ne.Timeout() {
+				continue
+			}
+			break
+		}
+		if source == 0x00 || source == t.source || source == 0xDF {
+			continue
+		}
+		if len(data) == 0 {
+			continue
+		}
+		if _, exists := seen[source]; exists {
+			continue
+		}
+		seen[source] = ECUInfo{
+			Address:  formatU8(source),
+			Name:     bmwEcuName(source),
+			Protocol: t.Name(),
+			Present:  true,
+		}
+	}
+
+	ecus := make([]ECUInfo, 0, len(seen))
+	for _, ecu := range seen {
+		ecus = append(ecus, ecu)
+	}
+	return ecus, nil
+}
+
 func (t *HSFZTransport) ReadDTC(ctx context.Context, ecu ECUInfo) ([]DTCInfo, error) {
 	addr, err := parseMaybeHexU16(ecu.Address)
 	if err != nil {
 		return nil, err
 	}
-	resp, err := t.request(ctx, addr, []byte{0x19, 0x02}, "dtc.read")
+	resp, err := t.request(ctx, uint8(addr), []byte{0x19, 0x02, 0x2F}, "dtc.read")
 	if err != nil {
 		return nil, err
 	}
-	if len(resp) < 2 || resp[0] != 0x59 || resp[1] != 0x02 {
+	if len(resp) < 3 || resp[0] != 0x59 || resp[1] != 0x02 {
 		return nil, fmt.Errorf("unexpected DTC response: %X", resp)
 	}
-	return parseDTCResponse(ecu, resp[2:]), nil
+	return parseDTCResponse(ecu, resp[3:]), nil
 }
 
 func (t *HSFZTransport) ReadParameters(ctx context.Context, ecu ECUInfo, dids []string) ([]ParameterInfo, error) {
@@ -127,7 +205,7 @@ func (t *HSFZTransport) ReadParameters(ctx context.Context, ecu ECUInfo, dids []
 		if err != nil || len(didBytes) != 2 {
 			continue
 		}
-		resp, err := t.request(ctx, addr, []byte{0x22, didBytes[0], didBytes[1]}, "params.read")
+		resp, err := t.request(ctx, uint8(addr), []byte{0x22, didBytes[0], didBytes[1]}, "params.read")
 		if err != nil {
 			continue
 		}
@@ -149,9 +227,9 @@ func (t *HSFZTransport) ReadParameters(ctx context.Context, ecu ECUInfo, dids []
 func (t *HSFZTransport) TesterPresent(ctx context.Context, ecu ECUInfo) error {
 	addr, err := parseMaybeHexU16(ecu.Address)
 	if err != nil {
-		addr = t.target
+		addr = uint16(t.target)
 	}
-	_, err = t.request(ctx, addr, []byte{0x3E, 0x80}, "tester.present")
+	_, err = t.request(ctx, uint8(addr), []byte{0x3E, 0x80}, "tester.present")
 	return err
 }
 
@@ -164,34 +242,39 @@ func (t *HSFZTransport) Close() error {
 	return nil
 }
 
-func (t *HSFZTransport) request(ctx context.Context, target uint16, uds []byte, message string) ([]byte, error) {
-	start := time.Now()
+func (t *HSFZTransport) request(ctx context.Context, target uint8, uds []byte, message string) ([]byte, error) {
 	if err := t.writeFrame(target, uds, message); err != nil {
 		return nil, err
 	}
-	_ = start
 	for {
-		_, payload, err := t.readFrame()
+		_ = t.conn.SetReadDeadline(time.Now().Add(3 * time.Second))
+		source, _, payload, err := t.readFrame()
 		if err != nil {
 			return nil, err
 		}
-		if len(payload) >= 3 && payload[0] == 0x7F && payload[2] == 0x78 {
-			continue
+		if len(payload) >= 3 && payload[0] == 0x7F {
+			switch payload[2] {
+			case 0x78:
+				continue
+			case 0x36, 0x37:
+				time.Sleep(11 * time.Second)
+				continue
+			default:
+				return nil, fmt.Errorf("nrc 0x%02X from %02X: %X", payload[2], source, payload)
+			}
 		}
 		return payload, nil
 	}
 }
 
-func (t *HSFZTransport) writeFrame(target uint16, uds []byte, message string) error {
+func (t *HSFZTransport) writeFrame(target uint8, uds []byte, message string) error {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	if t.conn == nil {
 		return errors.New("hsfz connection not established")
 	}
-	body := make([]byte, 4+len(uds))
-	binary.BigEndian.PutUint16(body[0:2], t.source)
-	binary.BigEndian.PutUint16(body[2:4], target)
-	copy(body[4:], uds)
+
+	body := append([]byte{t.source, target}, uds...)
 	header := make([]byte, 6)
 	binary.BigEndian.PutUint32(header[0:4], uint32(len(body)))
 	binary.BigEndian.PutUint16(header[4:6], 0x0001)
@@ -205,32 +288,36 @@ func (t *HSFZTransport) writeFrame(target uint16, uds []byte, message string) er
 		Protocol:  t.Name(),
 		Direction: "tx",
 		FrameHex:  encodeHex(append(header, body...)),
-		Source:    formatU16(t.source),
-		Target:    formatU16(target),
+		Source:    formatU8(t.source),
+		Target:    formatU8(target),
 		Message:   message,
 	})
 	return nil
 }
 
-func (t *HSFZTransport) readFrame() (uint16, []byte, error) {
+func (t *HSFZTransport) readFrame() (uint8, uint8, []byte, error) {
 	header := make([]byte, 6)
 	if _, err := io.ReadFull(t.conn, header); err != nil {
-		return 0, nil, err
+		return 0, 0, nil, err
 	}
 	length := binary.BigEndian.Uint32(header[0:4])
 	body := make([]byte, length)
 	if _, err := io.ReadFull(t.conn, body); err != nil {
-		return 0, nil, err
+		return 0, 0, nil, err
 	}
+	if len(body) < 2 {
+		return 0, 0, nil, errors.New("hsfz body too short")
+	}
+
+	source := body[0]
+	target := body[1]
+	payload := body[2:]
 	t.emit(FrameRecord{
 		Protocol:  t.Name(),
 		Direction: "rx",
 		FrameHex:  encodeHex(append(header, body...)),
-		Source:    formatU16(t.source),
-		Target:    formatU16(t.target),
+		Source:    formatU8(source),
+		Target:    formatU8(target),
 	})
-	if len(body) < 4 {
-		return 0, nil, errors.New("hsfz body too short")
-	}
-	return binary.BigEndian.Uint16(body[2:4]), body[4:], nil
+	return source, target, payload, nil
 }
