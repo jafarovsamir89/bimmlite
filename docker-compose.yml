@@ -1,0 +1,40 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: bimmlite
+      POSTGRES_USER: bimmlite
+      POSTGRES_PASSWORD: bimmlite
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+
+  backend:
+    build:
+      context: ./backend
+    env_file:
+      - .env
+    environment:
+      BIMM_DATABASE_URL: postgresql+psycopg://bimmlite:bimmlite@postgres:5432/bimmlite
+      BIMM_ALLOWED_ORIGINS: http://localhost:5173
+      BIMM_BRIDGE_SESSION_TOKEN: change-me
+    ports:
+      - "8000:8000"
+    depends_on:
+      - postgres
+
+  bridge:
+    build:
+      context: ./bridge
+    env_file:
+      - .env
+    environment:
+      BRIDGE_WS_URL: ws://backend:8000/ws/bridge
+      BRIDGE_SESSION_TOKEN: change-me
+      BRIDGE_SESSION_ID: bridge-local
+    depends_on:
+      - backend
+
+volumes:
+  postgres_data:
