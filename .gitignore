@@ -21,4 +21,5 @@ bridge/.cache/
 *.log
 *.sqlite
 *.db
+*.tsbuildinfo
 *.DS_Store
