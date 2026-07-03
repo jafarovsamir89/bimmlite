@@ -14,6 +14,45 @@ class PingResponse(BaseModel):
     bridge_connected: bool
 
 
+class EcuInfo(BaseModel):
+    address: str
+    name: str = ""
+    protocol: str = ""
+    present: bool = True
+
+
+class DtcInfo(BaseModel):
+    ecu_address: str = ""
+    ecu_name: str = ""
+    code: str
+    status: str = ""
+    description: str = ""
+    raw: str = ""
+
+
+class ParameterInfo(BaseModel):
+    ecu_address: str = ""
+    ecu_name: str = ""
+    did: str
+    value_hex: str = ""
+    value_text: str = ""
+
+
+class Phase1Snapshot(BaseModel):
+    protocol: str
+    vin: str
+    battery_voltage: float | None = None
+    ecus: list[EcuInfo] = Field(default_factory=list)
+    dtcs: list[DtcInfo] = Field(default_factory=list)
+    parameters: list[ParameterInfo] = Field(default_factory=list)
+
+
+class Phase1SnapshotResponse(BaseModel):
+    trace_id: str
+    session_id: str
+    snapshot: Phase1Snapshot
+
+
 class LogItem(BaseModel):
     ts: str
     level: str

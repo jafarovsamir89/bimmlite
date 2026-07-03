@@ -7,9 +7,21 @@ import structlog
 
 from app.core.trace import bind_context
 
+TRACE_LEVEL = 5
 
-def configure_logging() -> None:
-    logging.basicConfig(format="%(message)s", stream=sys.stdout, level=logging.INFO)
+
+def _trace(self: logging.Logger, message: str, *args: object, **kwargs: object) -> None:
+    if self.isEnabledFor(TRACE_LEVEL):
+        self._log(TRACE_LEVEL, message, args, **kwargs)
+
+
+logging.addLevelName(TRACE_LEVEL, "TRACE")
+logging.Logger.trace = _trace  # type: ignore[attr-defined]
+
+
+def configure_logging(level: str = "INFO") -> None:
+    numeric_level = getattr(logging, level.upper(), logging.INFO)
+    logging.basicConfig(format="%(message)s", stream=sys.stdout, level=numeric_level)
     structlog.configure(
         processors=[
             structlog.contextvars.merge_contextvars,

@@ -86,6 +86,9 @@ class TelemetryService:
 
         bound = self.logger.bind(module=module, event=event, trace_id=trace_id, session_id=session_id)
         method_name = level.lower()
+        if method_name == "trace":
+            bound.log(5, message or event, **extra)
+            return payload
         if method_name == "warn":
             method_name = "warning"
         log_method = getattr(bound, method_name, bound.info)

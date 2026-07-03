@@ -2,6 +2,14 @@ export const PROTOCOL_VERSION = "1.0" as const;
 
 export type ProtocolVersion = typeof PROTOCOL_VERSION;
 export type MessageType = "auth" | "command" | "frame" | "result" | "log" | "heartbeat";
+export type BridgeCommand =
+  | "ping"
+  | "echo"
+  | "connect.discover"
+  | "ecu.scan"
+  | "dtc.read"
+  | "params.read"
+  | "tester.present";
 
 export interface Envelope<TPayload = unknown> {
   version: ProtocolVersion;
@@ -18,7 +26,7 @@ export interface AuthPayload {
 }
 
 export interface CommandPayload {
-  command: "ping" | "echo" | (string & {});
+  command: BridgeCommand;
   args?: Record<string, unknown>;
 }
 
@@ -26,6 +34,9 @@ export interface ResultPayload {
   ok: boolean;
   data?: unknown;
   error?: string;
+  nrc?: string;
+  protocol?: "hsfz" | "doip";
+  rtt_ms?: number;
 }
 
 export interface LogPayload {
@@ -37,6 +48,18 @@ export interface LogPayload {
   result?: string;
   error?: string;
   duration_ms?: number;
+}
+
+export interface FramePayload {
+  protocol: "hsfz" | "doip" | "uds";
+  direction: "tx" | "rx";
+  frame_hex: string;
+  source?: string;
+  target?: string;
+  service_id?: string;
+  nrc?: string;
+  rtt_ms?: number;
+  metadata?: Record<string, unknown>;
 }
 
 export interface HeartbeatPayload {
@@ -82,5 +105,18 @@ export function createAuthEnvelope(
     session_id,
     msg_type: "auth",
     payload: { token, device_id },
+  });
+}
+
+export function createFrameEnvelope(
+  trace_id: string,
+  session_id: string,
+  payload: FramePayload,
+): Envelope<FramePayload> {
+  return createEnvelope({
+    trace_id,
+    session_id,
+    msg_type: "frame",
+    payload,
   });
 }

@@ -7,6 +7,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.api.routes.bridge import router as bridge_router
 from app.api.routes.health import router as health_router
+from app.api.routes.phase1 import router as phase1_router
 from app.api.routes.logs import router as logs_router
 from app.api.routes.ops import router as ops_router
 from app.core.config import get_settings
@@ -20,8 +21,10 @@ from app.services.telemetry import TelemetryService
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    configure_logging()
-    Base.metadata.create_all(bind=engine)
+    settings = get_settings()
+    configure_logging(settings.log_level)
+    if settings.env.lower() == "test":
+        Base.metadata.create_all(bind=engine)
     if not hasattr(app.state, "bridge_manager"):
         app.state.bridge_manager = BridgeManager()
     if not hasattr(app.state, "telemetry"):
@@ -47,6 +50,7 @@ def create_app() -> FastAPI:
     app.middleware("http")(trace_middleware)
 
     app.include_router(health_router)
+    app.include_router(phase1_router)
     app.include_router(ops_router)
     app.include_router(logs_router)
     app.include_router(bridge_router)

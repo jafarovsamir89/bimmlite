@@ -73,6 +73,25 @@ async def bridge_socket(websocket: WebSocket) -> None:
                 )
                 continue
 
+            if msg_type == "frame":
+                direction = str(payload.get("direction", "rx"))
+                await telemetry.emit(
+                    db_session,
+                    level="trace",
+                    module=str(payload.get("module", "uds")),
+                    event=str(payload.get("event", f"uds.frame.{direction}")),
+                    trace_id=trace_id,
+                    session_id=session_id,
+                    vin=str(payload.get("vin", "")),
+                    ecu=str(payload.get("ecu", "")),
+                    payload_hex=str(payload.get("frame_hex", "")),
+                    result=direction,
+                    error=str(payload.get("nrc", "")),
+                    message=str(payload.get("message", "")),
+                    persist=True,
+                )
+                continue
+
             if msg_type == "result":
                 await bridge.handle_incoming(raw)
                 continue
