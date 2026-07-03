@@ -1,0 +1,75 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "BimmLite Bridge Protocol",
+  "type": "object",
+  "required": ["version", "ts", "trace_id", "session_id", "msg_type", "payload"],
+  "properties": {
+    "version": {
+      "type": "string",
+      "enum": ["1.0"]
+    },
+    "ts": {
+      "type": "string",
+      "description": "RFC 3339 timestamp in UTC"
+    },
+    "trace_id": {
+      "type": "string",
+      "minLength": 8
+    },
+    "session_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "msg_type": {
+      "type": "string",
+      "enum": ["auth", "command", "frame", "result", "log", "heartbeat"]
+    },
+    "payload": {
+      "type": "object"
+    }
+  },
+  "oneOf": [
+    {
+      "properties": {
+        "msg_type": {
+          "const": "auth"
+        }
+      }
+    },
+    {
+      "properties": {
+        "msg_type": {
+          "const": "command"
+        }
+      }
+    },
+    {
+      "properties": {
+        "msg_type": {
+          "const": "frame"
+        }
+      }
+    },
+    {
+      "properties": {
+        "msg_type": {
+          "const": "result"
+        }
+      }
+    },
+    {
+      "properties": {
+        "msg_type": {
+          "const": "log"
+        }
+      }
+    },
+    {
+      "properties": {
+        "msg_type": {
+          "const": "heartbeat"
+        }
+      }
+    }
+  ]
+}
