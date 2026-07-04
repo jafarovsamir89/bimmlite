@@ -98,7 +98,8 @@ build_backend() {
   . .venv/bin/activate
   python -m pip install --upgrade pip
   pip install -e backend
-  alembic -c backend/alembic.ini upgrade head
+  cd backend
+  alembic -c alembic.ini upgrade head
   sudo systemctl restart "$SERVICE"
 }
 
