@@ -50,14 +50,40 @@ detect_nginx_root() {
   printf '%s\n' "$root"
 }
 
+detect_nginx_owner_group() {
+  local root="$1"
+  local owner_group=""
+
+  if [[ -d "$root" ]]; then
+    owner_group="$(stat -c '%U:%G' "$root" 2>/dev/null || true)"
+  fi
+
+  if [[ -z "$owner_group" || "$owner_group" == "root:root" ]]; then
+    owner_group="$(awk '
+      $1 == "user" && $2 ~ /[A-Za-z0-9_-]+;/ {
+        gsub(";", "", $2);
+        print $2 ":" $2;
+        exit
+      }
+    ' /etc/nginx/nginx.conf 2>/dev/null || true)"
+  fi
+
+  if [[ -z "$owner_group" ]]; then
+    owner_group="www-data:www-data"
+  fi
+
+  printf '%s\n' "$owner_group"
+}
+
 sync_nginx_static() {
   local root="$1"
+  local owner_group="$2"
   local dist_dir="$APP_DIR/frontend/dist"
   [[ -d "$dist_dir" ]] || fail "frontend dist not found: $dist_dir"
   [[ -d "$root" ]] || fail "nginx root does not exist: $root"
 
   sudo rsync -a --delete "$dist_dir"/ "$root"/
-  sudo chown -R caddy:caddy "$root"
+  sudo chown -R "$owner_group" "$root"
   sudo find "$root" -type d -exec chmod 755 {} +
   sudo find "$root" -type f -exec chmod 644 {} +
 }
@@ -131,8 +157,10 @@ main() {
   build_frontend
 
   NGINX_ROOT="$(detect_nginx_root)"
+  NGINX_OWNER_GROUP="$(detect_nginx_owner_group "$NGINX_ROOT")"
   log "INFO" "detected nginx root=$NGINX_ROOT"
-  sync_nginx_static "$NGINX_ROOT"
+  log "INFO" "detected nginx owner_group=$NGINX_OWNER_GROUP"
+  sync_nginx_static "$NGINX_ROOT" "$NGINX_OWNER_GROUP"
   ensure_nginx_cache_rules
 
   sudo nginx -t
