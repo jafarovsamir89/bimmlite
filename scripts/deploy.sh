@@ -23,6 +23,7 @@ fail() {
 
 ensure_logfile() {
   sudo touch "$LOG_FILE"
+  sudo chown "$(id -un)":"$(id -gn)" "$LOG_FILE"
   sudo chmod 664 "$LOG_FILE"
 }
 
