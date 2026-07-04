@@ -19,6 +19,7 @@ import (
 
 	"bimmlite/bridge/internal/transport"
 	"github.com/gorilla/websocket"
+	"github.com/zalando/go-keyring"
 )
 
 type Envelope struct {
@@ -68,9 +69,19 @@ func runBridgeCLI(diagnose bool) {
 }
 
 func loadConfig(diagnose bool) Config {
+	token := strings.TrimSpace(os.Getenv("BRIDGE_SESSION_TOKEN"))
+	if token == "" {
+		if stored, err := keyring.Get(launcherKeyringService, launcherKeyringUser); err == nil {
+			token = strings.TrimSpace(stored)
+		}
+	}
+	if token == "" {
+		token = "change-me"
+	}
+
 	return Config{
 		WSURL:                 getEnv("BRIDGE_WS_URL", "ws://localhost:8000/ws/bridge"),
-		SessionToken:          getEnv("BRIDGE_SESSION_TOKEN", "change-me"),
+		SessionToken:          token,
 		SessionID:             getEnv("BRIDGE_SESSION_ID", "bridge-local"),
 		DeviceID:              getEnv("BRIDGE_DEVICE_ID", "desktop-readonly"),
 		TLSSkipVerify:         strings.EqualFold(getEnv("BRIDGE_TLS_INSECURE", "true"), "true"),
