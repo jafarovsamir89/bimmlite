@@ -42,13 +42,15 @@ class Phase1Service:
             session_id=session_id,
             message="starting vehicle discovery",
         )
-        discover = await self.bridge.send_command(
+        discover = self._unwrap_bridge_result(
+            await self.bridge.send_command(
             command="connect.discover",
             payload={"mode": "auto"},
             trace_id=trace_id,
             session_id=session_id,
         )
-        discover_payload = discover.get("payload", {})
+        )
+        discover_payload = discover
         vehicle = discover_payload.get("vehicle", {})
         protocol = str(vehicle.get("protocol", discover_payload.get("protocol", "unknown")))
         vehicle_ip = str(vehicle.get("ip", discover_payload.get("ip", "")))
@@ -77,13 +79,15 @@ class Phase1Service:
             vin=vin,
             message="starting ECU scan",
         )
-        scan = await self.bridge.send_command(
+        scan = self._unwrap_bridge_result(
+            await self.bridge.send_command(
             command="ecu.scan",
             payload={"vin": vin},
             trace_id=trace_id,
             session_id=session_id,
         )
-        ecus = list(scan.get("payload", {}).get("ecus", []))
+        )
+        ecus = list(scan.get("ecus", []))
         await self.telemetry.emit(
             db,
             level="info",
@@ -112,13 +116,15 @@ class Phase1Service:
                 ecu=str(ecu_name),
                 message="reading DTCs",
             )
-            dtc_result = await self.bridge.send_command(
+            dtc_result = self._unwrap_bridge_result(
+                await self.bridge.send_command(
                 command="dtc.read",
                 payload={"ecu_address": ecu_address, "ecu_name": ecu_name},
                 trace_id=trace_id,
                 session_id=session_id,
             )
-            ecu_dtcs = list(dtc_result.get("payload", {}).get("dtcs", []))
+            )
+            ecu_dtcs = list(dtc_result.get("dtcs", []))
             for dtc in ecu_dtcs:
                 if not dtc.get("description"):
                     dtc["description"] = self.dtc_catalog.describe(str(dtc.get("code", "")), ecu_name=str(ecu_name))
@@ -147,7 +153,8 @@ class Phase1Service:
                 ecu=str(ecu_name),
                 message="reading standard parameters",
             )
-            params_result = await self.bridge.send_command(
+            params_result = self._unwrap_bridge_result(
+                await self.bridge.send_command(
                 command="params.read",
                 payload={
                     "ecu_address": ecu_address,
@@ -157,7 +164,8 @@ class Phase1Service:
                 trace_id=trace_id,
                 session_id=session_id,
             )
-            ecu_params = list(params_result.get("payload", {}).get("parameters", []))
+            )
+            ecu_params = list(params_result.get("parameters", []))
             parameters.extend(ecu_params)
             await self.telemetry.emit(
                 db,
@@ -191,3 +199,13 @@ class Phase1Service:
             dtcs=dtcs,
             parameters=parameters,
         )
+
+    @staticmethod
+    def _unwrap_bridge_result(message: dict[str, Any]) -> dict[str, Any]:
+        payload = message.get("payload", {})
+        if not isinstance(payload, dict):
+            return {}
+        if payload.get("ok") is False:
+            raise RuntimeError(str(payload.get("error", "bridge command failed")))
+        data = payload.get("data", payload)
+        return data if isinstance(data, dict) else {}
