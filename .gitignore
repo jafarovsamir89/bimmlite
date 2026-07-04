@@ -16,6 +16,7 @@ backend/.venv/
 backend/.pytest_cache/
 backend/.ruff_cache/
 backend/*.egg-info/
+backend/data/DTC.dat
 bridge/bin/
 bridge/.cache/
 *.log
