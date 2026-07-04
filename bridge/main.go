@@ -4,8 +4,8 @@ import (
 	"context"
 	"crypto/rand"
 	"crypto/tls"
-	"encoding/json"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"log"
 	"net/http"
@@ -38,7 +38,7 @@ type Config struct {
 	TLSSkipVerify         bool
 	HeartbeatInterval     time.Duration
 	ReconnectInterval     time.Duration
-	TesterPresentInterval  time.Duration
+	TesterPresentInterval time.Duration
 }
 
 func main() {
@@ -59,13 +59,13 @@ func main() {
 
 func loadConfig() Config {
 	return Config{
-		WSURL:                getEnv("BRIDGE_WS_URL", "ws://localhost:8000/ws/bridge"),
-		SessionToken:         getEnv("BRIDGE_SESSION_TOKEN", "change-me"),
-		SessionID:            getEnv("BRIDGE_SESSION_ID", "bridge-local"),
-		DeviceID:             getEnv("BRIDGE_DEVICE_ID", "desktop-readonly"),
-		TLSSkipVerify:        strings.EqualFold(getEnv("BRIDGE_TLS_INSECURE", "true"), "true"),
-		HeartbeatInterval:    envDuration("BRIDGE_HEARTBEAT_SECONDS", 15),
-		ReconnectInterval:    envDuration("BRIDGE_RECONNECT_SECONDS", 5),
+		WSURL:                 getEnv("BRIDGE_WS_URL", "ws://localhost:8000/ws/bridge"),
+		SessionToken:          getEnv("BRIDGE_SESSION_TOKEN", "change-me"),
+		SessionID:             getEnv("BRIDGE_SESSION_ID", "bridge-local"),
+		DeviceID:              getEnv("BRIDGE_DEVICE_ID", "desktop-readonly"),
+		TLSSkipVerify:         strings.EqualFold(getEnv("BRIDGE_TLS_INSECURE", "true"), "true"),
+		HeartbeatInterval:     envDuration("BRIDGE_HEARTBEAT_SECONDS", 15),
+		ReconnectInterval:     envDuration("BRIDGE_RECONNECT_SECONDS", 5),
 		TesterPresentInterval: envDuration("BRIDGE_TESTER_PRESENT_SECONDS", 15),
 	}
 }
@@ -90,10 +90,10 @@ func envDuration(key string, fallback int) time.Duration {
 }
 
 type BridgeClient struct {
-	cfg           Config
-	transport     transport.AdapterTransport
-	writeMu       sync.Mutex
-	transportMu   sync.Mutex
+	cfg              Config
+	transport        transport.AdapterTransport
+	writeMu          sync.Mutex
+	transportMu      sync.Mutex
 	keepaliveStarted bool
 }
 
@@ -295,11 +295,11 @@ func (b *BridgeClient) executeTransport(ctx context.Context, conn *websocket.Con
 			_ = b.sendLog(conn, traceID, sessionID, "INFO", "bridge", "connect.vin.ok", "vehicle discovered", "", "", "")
 		}
 		return map[string]any{
-			"protocol":       discovery.Protocol,
-			"vin":            discovery.VIN,
+			"protocol":        discovery.Protocol,
+			"vin":             discovery.VIN,
 			"battery_voltage": discovery.BatteryVoltage,
 			"target_address":  discovery.TargetAddress,
-			"ecus":           discovery.ECUs,
+			"ecus":            discovery.ECUs,
 		}, nil
 	case "ecu.scan":
 		ecus, err := b.transport.ScanECUs(ctx)
@@ -414,16 +414,16 @@ func (b *BridgeClient) sendFrame(conn *websocket.Conn, sessionID, traceID string
 		SessionID: sessionID,
 		MsgType:   "frame",
 		Payload: map[string]any{
-			"protocol":  frame.Protocol,
-			"direction": frame.Direction,
-			"frame_hex": frame.FrameHex,
-			"source":    frame.Source,
-			"target":    frame.Target,
+			"protocol":   frame.Protocol,
+			"direction":  frame.Direction,
+			"frame_hex":  frame.FrameHex,
+			"source":     frame.Source,
+			"target":     frame.Target,
 			"service_id": frame.ServiceID,
-			"nrc":       frame.NRC,
-			"rtt_ms":    frame.RTTMS,
-			"message":   frame.Message,
-			"metadata":  frame.Metadata,
+			"nrc":        frame.NRC,
+			"rtt_ms":     frame.RTTMS,
+			"message":    frame.Message,
+			"metadata":   frame.Metadata,
 		},
 	})
 }

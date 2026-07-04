@@ -73,8 +73,8 @@ func (t *HSFZTransport) Discover(ctx context.Context) (DiscoveryResult, error) {
 			VIN:            vin,
 			BatteryVoltage: battery,
 			ECUs:           []ECUInfo{},
-			TargetAddress:   formatU8(target),
-			SessionControl:  "0x03",
+			TargetAddress:  formatU8(target),
+			SessionControl: "0x03",
 		}, nil
 	}
 

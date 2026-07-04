@@ -13,8 +13,8 @@ import (
 )
 
 const (
-	doipVersion         = 0x02
-	doipPayloadDiagMsg  = 0x8001
+	doipVersion          = 0x02
+	doipPayloadDiagMsg   = 0x8001
 	doipPayloadRouting   = 0x0005
 	doipPayloadVehicleID = 0x0001
 	doipPayloadVinResp   = 0x0004
@@ -296,7 +296,7 @@ func (t *DoIPTransport) writeMessage(ctx context.Context, payloadType uint16, pa
 
 	header := make([]byte, 8)
 	header[0] = doipVersion
-	header[1] = ^doipVersion
+	header[1] = byte(^byte(doipVersion))
 	binary.BigEndian.PutUint16(header[2:4], payloadType)
 	binary.BigEndian.PutUint32(header[4:8], uint32(len(payload)))
 	if _, err := t.conn.Write(header); err != nil {

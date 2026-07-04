@@ -27,13 +27,13 @@ type ParameterInfo struct {
 }
 
 type DiscoveryResult struct {
-	Protocol        string      `json:"protocol"`
-	VIN             string      `json:"vin"`
-	BatteryVoltage   float64     `json:"battery_voltage,omitempty"`
-	ECUs            []ECUInfo   `json:"ecus"`
-	TargetAddress   string      `json:"target_address,omitempty"`
-	SessionControl  string      `json:"session_control,omitempty"`
-	DiscoverySource string      `json:"discovery_source,omitempty"`
+	Protocol        string    `json:"protocol"`
+	VIN             string    `json:"vin"`
+	BatteryVoltage  float64   `json:"battery_voltage,omitempty"`
+	ECUs            []ECUInfo `json:"ecus"`
+	TargetAddress   string    `json:"target_address,omitempty"`
+	SessionControl  string    `json:"session_control,omitempty"`
+	DiscoverySource string    `json:"discovery_source,omitempty"`
 }
 
 type FrameRecord struct {
