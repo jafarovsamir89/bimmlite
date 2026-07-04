@@ -7,10 +7,11 @@ from sqlalchemy.orm import Session
 
 from app.core.trace import current_session_id, current_trace_id
 from app.schemas import Phase1Snapshot
+from app.services.dtc_catalog import get_dtc_catalog
 from app.services.telemetry import TelemetryService
 
 
-DEFAULT_PARAMETER_DIDS = ["F190", "F187", "F188", "F189"]
+DEFAULT_PARAMETER_DIDS = ["F186", "F190", "100A", "100E", "172A", "F18C"]
 
 
 class Phase1Service:
@@ -18,6 +19,7 @@ class Phase1Service:
         self.request = request
         self.bridge = request.app.state.bridge_manager
         self.telemetry: TelemetryService = request.app.state.telemetry
+        self.dtc_catalog = get_dtc_catalog()
 
     async def connect_and_read(
         self,
@@ -49,6 +51,7 @@ class Phase1Service:
         discover_payload = discover.get("payload", {})
         vehicle = discover_payload.get("vehicle", {})
         protocol = str(vehicle.get("protocol", discover_payload.get("protocol", "unknown")))
+        vehicle_ip = str(vehicle.get("ip", discover_payload.get("ip", "")))
         vin = str(vehicle.get("vin", discover_payload.get("vin", "")))
         battery_voltage = vehicle.get("battery_voltage", discover_payload.get("battery_voltage"))
 
@@ -56,12 +59,12 @@ class Phase1Service:
             db,
             level="info",
             module="phase1",
-            event="connect.vin.ok",
+            event="connect.discover.found",
             trace_id=trace_id,
             session_id=session_id,
             vin=vin,
             result=protocol,
-            message="vehicle discovery complete",
+            message=f"vehicle discovery complete ip={vehicle_ip or 'unknown'} protocol={protocol}",
         )
 
         await self.telemetry.emit(
@@ -116,6 +119,9 @@ class Phase1Service:
                 session_id=session_id,
             )
             ecu_dtcs = list(dtc_result.get("payload", {}).get("dtcs", []))
+            for dtc in ecu_dtcs:
+                if not dtc.get("description"):
+                    dtc["description"] = self.dtc_catalog.describe(str(dtc.get("code", "")), ecu_name=str(ecu_name))
             dtcs.extend(ecu_dtcs)
             await self.telemetry.emit(
                 db,

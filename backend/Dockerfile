@@ -7,6 +7,7 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 
 COPY pyproject.toml /app/
 COPY app /app/app
+COPY data /app/data
 COPY alembic.ini /app/
 COPY alembic /app/alembic
 COPY tests /app/tests

@@ -283,6 +283,9 @@ func (b *BridgeClient) executeTransport(ctx context.Context, conn *websocket.Con
 
 	switch command {
 	case "connect.discover":
+		if err := b.sendLog(conn, traceID, sessionID, "INFO", "bridge", "connect.discover.start", "starting vehicle discovery", "", "", ""); err != nil {
+			return nil, err
+		}
 		discovery, err := b.transport.Discover(ctx)
 		if err != nil {
 			return nil, err
@@ -292,14 +295,18 @@ func (b *BridgeClient) executeTransport(ctx context.Context, conn *websocket.Con
 			go b.keepAliveLoop(ctx, conn, traceID, sessionID)
 		}
 		if discovery.VIN != "" {
-			_ = b.sendLog(conn, traceID, sessionID, "INFO", "bridge", "connect.vin.ok", "vehicle discovered", "", "", "")
+			_ = b.sendLogWithFields(conn, traceID, sessionID, "INFO", "bridge", "connect.discover.found", fmt.Sprintf("vehicle discovered at %s via %s", discovery.IP, discovery.Protocol), discovery.Protocol, "", "", map[string]any{
+				"vin": discovery.VIN,
+			})
 		}
 		return map[string]any{
-			"protocol":        discovery.Protocol,
-			"vin":             discovery.VIN,
-			"battery_voltage": discovery.BatteryVoltage,
-			"target_address":  discovery.TargetAddress,
-			"ecus":            discovery.ECUs,
+			"protocol":         discovery.Protocol,
+			"ip":               discovery.IP,
+			"vin":              discovery.VIN,
+			"battery_voltage":  discovery.BatteryVoltage,
+			"target_address":   discovery.TargetAddress,
+			"ecus":             discovery.ECUs,
+			"discovery_source": discovery.DiscoverySource,
 		}, nil
 	case "ecu.scan":
 		ecus, err := b.transport.ScanECUs(ctx)
@@ -385,8 +392,24 @@ func (b *BridgeClient) sendEnvelope(conn *websocket.Conn, envelope Envelope) err
 }
 
 func (b *BridgeClient) sendLog(conn *websocket.Conn, traceID, sessionID, level, module, event, message, result, errorText, payloadHex string) error {
+	return b.sendLogWithFields(conn, traceID, sessionID, level, module, event, message, result, errorText, payloadHex, nil)
+}
+
+func (b *BridgeClient) sendLogWithFields(conn *websocket.Conn, traceID, sessionID, level, module, event, message, result, errorText, payloadHex string, extra map[string]any) error {
 	if conn == nil {
 		return nil
+	}
+	payload := map[string]any{
+		"level":       level,
+		"module":      module,
+		"event":       event,
+		"message":     message,
+		"result":      result,
+		"error":       errorText,
+		"payload_hex": payloadHex,
+	}
+	for key, value := range extra {
+		payload[key] = value
 	}
 	return b.sendEnvelope(conn, Envelope{
 		Version:   "1.0",
@@ -394,15 +417,7 @@ func (b *BridgeClient) sendLog(conn *websocket.Conn, traceID, sessionID, level, 
 		TraceID:   traceID,
 		SessionID: sessionID,
 		MsgType:   "log",
-		Payload: map[string]any{
-			"level":       level,
-			"module":      module,
-			"event":       event,
-			"message":     message,
-			"result":      result,
-			"error":       errorText,
-			"payload_hex": payloadHex,
-		},
+		Payload:   payload,
 	})
 }
 

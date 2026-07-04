@@ -97,12 +97,14 @@ func (t *DoIPTransport) Discover(ctx context.Context) (DiscoveryResult, error) {
 		return DiscoveryResult{Protocol: t.Name(), ECUs: []ECUInfo{}}, err
 	}
 	return DiscoveryResult{
-		Protocol:       t.Name(),
-		VIN:            vin,
-		BatteryVoltage: battery,
-		ECUs:           []ECUInfo{},
-		TargetAddress:  formatU16(t.target),
-		SessionControl: "0x03",
+		Protocol:        t.Name(),
+		IP:              t.host,
+		VIN:             vin,
+		BatteryVoltage:  battery,
+		ECUs:            []ECUInfo{},
+		TargetAddress:   formatU16(t.target),
+		SessionControl:  "0x03",
+		DiscoverySource: "doip_vehicle_identification",
 	}, nil
 }
 

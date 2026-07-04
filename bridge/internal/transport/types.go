@@ -28,6 +28,7 @@ type ParameterInfo struct {
 
 type DiscoveryResult struct {
 	Protocol        string    `json:"protocol"`
+	IP              string    `json:"ip,omitempty"`
 	VIN             string    `json:"vin"`
 	BatteryVoltage  float64   `json:"battery_voltage,omitempty"`
 	ECUs            []ECUInfo `json:"ecus"`

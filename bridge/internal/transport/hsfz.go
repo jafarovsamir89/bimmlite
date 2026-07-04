@@ -69,12 +69,14 @@ func (t *HSFZTransport) Discover(ctx context.Context) (DiscoveryResult, error) {
 		}
 		t.target = target
 		return DiscoveryResult{
-			Protocol:       t.Name(),
-			VIN:            vin,
-			BatteryVoltage: battery,
-			ECUs:           []ECUInfo{},
-			TargetAddress:  formatU8(target),
-			SessionControl: "0x03",
+			Protocol:        t.Name(),
+			IP:              t.host,
+			VIN:             vin,
+			BatteryVoltage:  battery,
+			ECUs:            []ECUInfo{},
+			TargetAddress:   formatU8(target),
+			SessionControl:  "0x03",
+			DiscoverySource: "uds_vin",
 		}, nil
 	}
 

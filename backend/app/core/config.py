@@ -17,6 +17,9 @@ class Settings(BaseSettings):
     bridge_heartbeat_seconds: int = 15
     bridge_command_timeout_seconds: int = 10
     log_level: str = "INFO"
+    dtc_language: str = "en"
+    dtc_source_path: str = "data/DTC.dat"
+    dtc_store_path: str = "data/dtc_descriptions.sqlite"
 
     model_config = SettingsConfigDict(
         env_prefix="BIMM_",
