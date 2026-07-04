@@ -21,6 +21,13 @@ import (
 	"github.com/gorilla/websocket"
 )
 
+type Mode string
+
+const (
+	ModeLauncher Mode = "launcher"
+	ModeBridge   Mode = "bridge"
+)
+
 type Envelope struct {
 	Version   string         `json:"version"`
 	Ts        string         `json:"ts"`
@@ -42,14 +49,19 @@ type Config struct {
 }
 
 func main() {
+	if detectMode() == ModeBridge {
+		runBridgeCLI()
+		return
+	}
+	runLauncherCLI()
+}
+
+func runBridgeCLI() {
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer cancel()
 
 	cfg := loadConfig()
-	client := &BridgeClient{
-		cfg:       cfg,
-		transport: transport.NewAutoTransportFromEnv(),
-	}
+	client := newBridgeClient(cfg, nil)
 
 	log.Printf("bridge starting ws_url=%s session_id=%s", cfg.WSURL, cfg.SessionID)
 	if err := client.Run(ctx); err != nil && ctx.Err() == nil {
@@ -95,6 +107,36 @@ type BridgeClient struct {
 	writeMu          sync.Mutex
 	transportMu      sync.Mutex
 	keepaliveStarted bool
+	statusSink       func(BridgeStatus)
+}
+
+type BridgeStatus struct {
+	Connected     bool
+	LastHeartbeat time.Time
+	Message       string
+}
+
+func newBridgeClient(cfg Config, statusSink func(BridgeStatus)) *BridgeClient {
+	return &BridgeClient{
+		cfg:        cfg,
+		transport:  transport.NewAutoTransportFromEnv(),
+		statusSink: statusSink,
+	}
+}
+
+func (b *BridgeClient) notifyStatus(connected bool, message string) {
+	if b.statusSink == nil {
+		return
+	}
+	heartbeat := time.Time{}
+	if connected {
+		heartbeat = time.Now().UTC()
+	}
+	b.statusSink(BridgeStatus{
+		Connected:     connected,
+		LastHeartbeat: heartbeat,
+		Message:       message,
+	})
 }
 
 func (b *BridgeClient) Run(ctx context.Context) error {
@@ -111,6 +153,7 @@ func (b *BridgeClient) Run(ctx context.Context) error {
 		if err == nil || ctx.Err() != nil {
 			return err
 		}
+		b.notifyStatus(false, err.Error())
 		log.Printf("bridge reconnecting after error: %v", err)
 		select {
 		case <-time.After(backoff):
@@ -155,6 +198,7 @@ func (b *BridgeClient) runOnce(ctx context.Context) error {
 	}); err != nil {
 		return err
 	}
+	b.notifyStatus(true, "bridge authenticated")
 	defer b.transport.Close()
 
 	heartbeatTicker := time.NewTicker(b.cfg.HeartbeatInterval)
@@ -214,6 +258,7 @@ func (b *BridgeClient) readLoop(ctx context.Context, conn *websocket.Conn) error
 			}
 		case "heartbeat":
 			log.Printf("bridge heartbeat ack trace_id=%s", envelope.TraceID)
+			b.notifyStatus(true, "heartbeat acknowledged")
 		}
 	}
 }
