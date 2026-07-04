@@ -31,6 +31,14 @@ const (
 	defaultAppURL          = "https://34.44.19.28"
 )
 
+type Mode string
+
+const (
+	ModeLauncher Mode = "launcher"
+	ModeBridge   Mode = "bridge"
+	ModeDiagnose Mode = "diagnose"
+)
+
 type launcherApp struct {
 	cfg     Config
 	appURL  string
@@ -73,20 +81,25 @@ type launcherLogEntry struct {
 }
 
 func detectMode() Mode {
-	if strings.EqualFold(strings.TrimSpace(os.Getenv("BIMM_MODE")), "bridge") {
+	switch strings.ToLower(strings.TrimSpace(os.Getenv("BIMM_MODE"))) {
+	case "bridge":
 		return ModeBridge
+	case "diagnose":
+		return ModeDiagnose
 	}
 	for _, arg := range os.Args[1:] {
 		switch strings.ToLower(strings.TrimSpace(arg)) {
 		case "--bridge", "-bridge", "--mode=bridge":
 			return ModeBridge
+		case "--diagnose", "-diagnose", "--mode=diagnose":
+			return ModeDiagnose
 		}
 	}
 	return ModeLauncher
 }
 
 func runLauncherCLI() {
-	cfg := loadConfig()
+	cfg := loadConfig(false)
 	appURL := strings.TrimSpace(os.Getenv("APP_URL"))
 	if appURL == "" {
 		appURL = defaultAppURL

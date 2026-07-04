@@ -21,13 +21,6 @@ import (
 	"github.com/gorilla/websocket"
 )
 
-type Mode string
-
-const (
-	ModeLauncher Mode = "launcher"
-	ModeBridge   Mode = "bridge"
-)
-
 type Envelope struct {
 	Version   string         `json:"version"`
 	Ts        string         `json:"ts"`
@@ -46,30 +39,35 @@ type Config struct {
 	HeartbeatInterval     time.Duration
 	ReconnectInterval     time.Duration
 	TesterPresentInterval time.Duration
+	Diagnose              bool
 }
 
 func main() {
-	if detectMode() == ModeBridge {
-		runBridgeCLI()
+	switch detectMode() {
+	case ModeBridge:
+		runBridgeCLI(false)
+		return
+	case ModeDiagnose:
+		runBridgeCLI(true)
 		return
 	}
 	runLauncherCLI()
 }
 
-func runBridgeCLI() {
+func runBridgeCLI(diagnose bool) {
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer cancel()
 
-	cfg := loadConfig()
+	cfg := loadConfig(diagnose)
 	client := newBridgeClient(cfg, nil)
 
-	log.Printf("bridge starting ws_url=%s session_id=%s", cfg.WSURL, cfg.SessionID)
+	log.Printf("bridge starting ws_url=%s session_id=%s diagnose=%t", cfg.WSURL, cfg.SessionID, cfg.Diagnose)
 	if err := client.Run(ctx); err != nil && ctx.Err() == nil {
 		log.Fatalf("bridge stopped: %v", err)
 	}
 }
 
-func loadConfig() Config {
+func loadConfig(diagnose bool) Config {
 	return Config{
 		WSURL:                 getEnv("BRIDGE_WS_URL", "ws://localhost:8000/ws/bridge"),
 		SessionToken:          getEnv("BRIDGE_SESSION_TOKEN", "change-me"),
@@ -79,6 +77,7 @@ func loadConfig() Config {
 		HeartbeatInterval:     envDuration("BRIDGE_HEARTBEAT_SECONDS", 15),
 		ReconnectInterval:     envDuration("BRIDGE_RECONNECT_SECONDS", 5),
 		TesterPresentInterval: envDuration("BRIDGE_TESTER_PRESENT_SECONDS", 15),
+		Diagnose:              diagnose,
 	}
 }
 
@@ -331,6 +330,15 @@ func (b *BridgeClient) executeTransport(ctx context.Context, conn *websocket.Con
 		if err := b.sendLog(conn, traceID, sessionID, "INFO", "bridge", "connect.discover.start", "starting vehicle discovery", "", "", ""); err != nil {
 			return nil, err
 		}
+		var restoreObserver func()
+		if b.cfg.Diagnose {
+			restoreObserver = transport.SetDiscoveryObserver(func(event transport.DiscoveryEvent) {
+				b.emitDiscoveryDiagnostic(conn, traceID, sessionID, event)
+			})
+		}
+		if restoreObserver != nil {
+			defer restoreObserver()
+		}
 		discovery, err := b.transport.Discover(ctx)
 		if err != nil {
 			return nil, err
@@ -339,7 +347,7 @@ func (b *BridgeClient) executeTransport(ctx context.Context, conn *websocket.Con
 			b.keepaliveStarted = true
 			go b.keepAliveLoop(ctx, conn, traceID, sessionID)
 		}
-		if discovery.VIN != "" {
+		if discovery.VIN != "" && !b.cfg.Diagnose {
 			_ = b.sendLogWithFields(conn, traceID, sessionID, "INFO", "bridge", "connect.discover.found", fmt.Sprintf("vehicle discovered at %s via %s", discovery.IP, discovery.Protocol), discovery.Protocol, "", "", map[string]any{
 				"vin": discovery.VIN,
 			})
@@ -464,6 +472,35 @@ func (b *BridgeClient) sendLogWithFields(conn *websocket.Conn, traceID, sessionI
 		MsgType:   "log",
 		Payload:   payload,
 	})
+}
+
+func (b *BridgeClient) emitDiscoveryDiagnostic(conn *websocket.Conn, traceID, sessionID string, event transport.DiscoveryEvent) {
+	if !b.cfg.Diagnose {
+		return
+	}
+
+	level := strings.ToUpper(strings.TrimSpace(event.Level))
+	if level == "" {
+		level = "DEBUG"
+	}
+
+	payload := map[string]any{
+		"ts":         event.Ts,
+		"level":      level,
+		"module":     "transport",
+		"event":      event.Event,
+		"trace_id":   traceID,
+		"session_id": sessionID,
+		"message":    event.Message,
+	}
+	for key, value := range event.Fields {
+		payload[key] = value
+	}
+	if raw, err := json.Marshal(payload); err == nil {
+		log.Printf("%s", raw)
+	}
+
+	_ = b.sendLogWithFields(conn, traceID, sessionID, level, "transport", event.Event, event.Message, "", "", stringFrom(event.Fields["hex"]), event.Fields)
 }
 
 func (b *BridgeClient) sendFrame(conn *websocket.Conn, sessionID, traceID string, frame transport.FrameRecord) error {

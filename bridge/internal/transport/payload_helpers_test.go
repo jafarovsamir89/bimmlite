@@ -33,7 +33,29 @@ func TestParseBMWDiscoveryResponse(t *testing.T) {
 	if !ok {
 		t.Fatal("expected BMW discovery response to parse")
 	}
+	if candidate.Protocol != "hsfz" {
+		t.Fatalf("unexpected protocol: %s", candidate.Protocol)
+	}
 	if candidate.VIN != "WBA12345678901234" {
 		t.Fatalf("unexpected VIN: %s", candidate.VIN)
+	}
+}
+
+func TestDiscoveryTargetsForLinkLocal(t *testing.T) {
+	targets := discoveryTargetsForIP("169.254.10.10")
+	if len(targets) != 4 {
+		t.Fatalf("unexpected target count: %d", len(targets))
+	}
+	if got := targets[0].Addr.Port; got != 6811 {
+		t.Fatalf("unexpected first port: %d", got)
+	}
+	if got := targets[1].Addr.Port; got != 6801 {
+		t.Fatalf("unexpected second port: %d", got)
+	}
+	if got := targets[2].Addr.Port; got != 6811 {
+		t.Fatalf("unexpected third port: %d", got)
+	}
+	if got := targets[3].Addr.Port; got != 13400 {
+		t.Fatalf("unexpected fourth port: %d", got)
 	}
 }
