@@ -29,6 +29,7 @@ const (
 	launcherKeyringService = "BimmLite"
 	launcherKeyringUser    = "bridge-session-token"
 	defaultAppURL          = "https://34.44.19.28"
+	defaultWSURL           = "wss://34.44.19.28/ws/bridge"
 )
 
 type Mode string

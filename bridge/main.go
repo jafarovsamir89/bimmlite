@@ -80,7 +80,7 @@ func loadConfig(diagnose bool) Config {
 	}
 
 	return Config{
-		WSURL:                 getEnv("BRIDGE_WS_URL", "ws://localhost:8000/ws/bridge"),
+		WSURL:                 getEnv("BRIDGE_WS_URL", defaultWSURL),
 		SessionToken:          token,
 		SessionID:             getEnv("BRIDGE_SESSION_ID", "bridge-local"),
 		DeviceID:              getEnv("BRIDGE_DEVICE_ID", "desktop-readonly"),
