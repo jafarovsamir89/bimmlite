@@ -81,14 +81,6 @@ class BridgeManager:
         session_id: str | None = None,
     ) -> dict[str, Any]:
         settings = get_settings()
-        if not self.connected or self.websocket is None:
-            try:
-                await asyncio.wait_for(self._connected_event.wait(), timeout=settings.bridge_command_timeout_seconds)
-            except TimeoutError as exc:
-                raise RuntimeError("bridge is not connected") from exc
-        if not self.connected or self.websocket is None:
-            raise RuntimeError("bridge is not connected")
-
         trace_id = trace_id or current_trace_id()
         session_id = session_id or current_session_id()
         envelope = {
@@ -100,28 +92,50 @@ class BridgeManager:
             "payload": {"command": command, "args": payload or {}},
         }
 
-        if self.telemetry is not None:
-            await self.telemetry.emit(
-                None,
-                level="debug",
-                module="bridge",
-                event="bridge.send_command",
-                trace_id=trace_id,
-                session_id=session_id,
-                message=f"send command {command}",
-                persist=False,
-                pid=self.pid,
-                command=command,
-                pending_commands=self.pending_commands + 1,
-            )
-
         future: asyncio.Future[dict[str, Any]] = asyncio.get_running_loop().create_future()
         self._pending[trace_id] = future
-        async with self._lock:
-            await self.websocket.send_text(json.dumps(envelope))
+        deadline = asyncio.get_running_loop().time() + settings.bridge_command_timeout_seconds
 
         try:
-            result = await asyncio.wait_for(future, timeout=settings.bridge_command_timeout_seconds)
+            while True:
+                if not self.connected or self.websocket is None:
+                    remaining = deadline - asyncio.get_running_loop().time()
+                    if remaining <= 0:
+                        raise RuntimeError("bridge is not connected")
+                    try:
+                        await asyncio.wait_for(self._connected_event.wait(), timeout=remaining)
+                    except TimeoutError as exc:
+                        raise RuntimeError("bridge is not connected") from exc
+
+                if self.telemetry is not None:
+                    await self.telemetry.emit(
+                        None,
+                        level="debug",
+                        module="bridge",
+                        event="bridge.send_command",
+                        trace_id=trace_id,
+                        session_id=session_id,
+                        message=f"send command {command}",
+                        persist=False,
+                        pid=self.pid,
+                        command=command,
+                        pending_commands=self.pending_commands + 1,
+                    )
+
+                async with self._lock:
+                    if not self.connected or self.websocket is None:
+                        continue
+                    try:
+                        await self.websocket.send_text(json.dumps(envelope))
+                        break
+                    except Exception as exc:
+                        self.last_error = str(exc)
+                        continue
+
+            remaining = deadline - asyncio.get_running_loop().time()
+            if remaining <= 0:
+                raise RuntimeError("bridge command timed out")
+            result = await asyncio.wait_for(future, timeout=remaining)
             if self.telemetry is not None:
                 await self.telemetry.emit(
                     None,
@@ -137,6 +151,7 @@ class BridgeManager:
                 )
             return result
         except TimeoutError as exc:
+            remaining_error = f"timeout after {settings.bridge_command_timeout_seconds}s"
             if self.telemetry is not None:
                 await self.telemetry.emit(
                     None,
@@ -145,7 +160,7 @@ class BridgeManager:
                     event="bridge.command.timeout",
                     trace_id=trace_id,
                     session_id=session_id,
-                    error=f"timeout after {settings.bridge_command_timeout_seconds}s",
+                    error=remaining_error,
                     message=f"command timeout for {command}",
                     persist=False,
                     pid=self.pid,
