@@ -40,10 +40,25 @@ async def bridge_socket(websocket: WebSocket) -> None:
             db_session,
             level="info",
             module="bridge",
+            event="bridge.attach",
+            trace_id=trace_id,
+            session_id=session_id,
+            message="bridge attached to websocket",
+            persist=True,
+            pid=bridge.pid,
+            bridge_attached=bridge.attached,
+            pending_commands=bridge.pending_commands,
+        )
+        await telemetry.emit(
+            db_session,
+            level="info",
+            module="bridge",
             event="bridge.auth.ok",
             trace_id=trace_id,
             session_id=session_id,
             message="bridge authenticated",
+            persist=True,
+            pid=bridge.pid,
         )
 
         while True:
@@ -106,6 +121,10 @@ async def bridge_socket(websocket: WebSocket) -> None:
                     trace_id=trace_id,
                     session_id=session_id,
                     message="heartbeat received from bridge",
+                    persist=True,
+                    pid=bridge.pid,
+                    bridge_attached=bridge.attached,
+                    pending_commands=bridge.pending_commands,
                 )
                 await websocket.send_text(
                     json.dumps(
@@ -130,7 +149,22 @@ async def bridge_socket(websocket: WebSocket) -> None:
                 module="bridge",
                 event="bridge.disconnected",
                 message="bridge disconnected",
+                persist=True,
+                pid=bridge.pid,
+                bridge_attached=bridge.attached,
+                pending_commands=bridge.pending_commands,
             )
     finally:
         bridge.detach()
+        await telemetry.emit(
+            db_session,
+            level="info",
+            module="bridge",
+            event="bridge.detach",
+            message="bridge detached from websocket",
+            persist=True,
+            pid=bridge.pid,
+            bridge_attached=bridge.attached,
+            pending_commands=bridge.pending_commands,
+        )
         db_session.close()

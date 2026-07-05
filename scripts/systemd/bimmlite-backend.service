@@ -1,0 +1,16 @@
+[Unit]
+Description=BimmLite Backend
+After=network.target postgresql.service
+Requires=postgresql.service
+
+[Service]
+Type=simple
+User=user
+WorkingDirectory=/home/user/bimmlite/backend
+EnvironmentFile=/home/user/bimmlite/backend/.env
+ExecStart=/home/user/bimmlite/backend/.venv/bin/uvicorn app.main:app --host 127.0.0.1 --port 8000 --workers 1
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

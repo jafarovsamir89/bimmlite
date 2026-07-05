@@ -29,6 +29,7 @@ async def lifespan(app: FastAPI):
         app.state.bridge_manager = BridgeManager()
     if not hasattr(app.state, "telemetry"):
         app.state.telemetry = TelemetryService(app)
+    app.state.bridge_manager.set_telemetry(app.state.telemetry)
     if not hasattr(app.state, "db_session_factory"):
         from app.core.db import SessionLocal
 

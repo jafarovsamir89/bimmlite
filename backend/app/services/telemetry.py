@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 from datetime import datetime, timezone
 from typing import Any
 
@@ -66,6 +67,7 @@ class TelemetryService:
         vin = vin if vin is not None else current_vin()
         ecu = ecu if ecu is not None else current_ecu()
         ts = datetime.now(timezone.utc)
+        extra = {"pid": os.getpid(), **extra}
         payload = {
             "ts": ts.isoformat(),
             "level": level.upper(),

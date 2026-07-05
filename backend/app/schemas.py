@@ -1,11 +1,17 @@
 from __future__ import annotations
 
+from datetime import datetime
+
 from pydantic import BaseModel, Field
 
 
 class HealthResponse(BaseModel):
     status: str = "ok"
     bridge_connected: bool = False
+    bridge_attached: bool = False
+    pid: int = 0
+    last_heartbeat_at: datetime | None = None
+    pending_commands: int = 0
 
 
 class PingResponse(BaseModel):

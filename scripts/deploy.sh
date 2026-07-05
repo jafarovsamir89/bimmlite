@@ -6,6 +6,8 @@ BRANCH="${BRANCH:-main}"
 SERVICE="${SERVICE:-bimmlite-backend}"
 LOG_FILE="${LOG_FILE:-/var/log/bimmlite-deploy.log}"
 NGINX_ROOT="${NGINX_ROOT:-}"
+SYSTEMD_UNIT_SRC="${SYSTEMD_UNIT_SRC:-$APP_DIR/scripts/systemd/bimmlite-backend.service}"
+SYSTEMD_UNIT_DST="${SYSTEMD_UNIT_DST:-/etc/systemd/system/${SERVICE}.service}"
 
 log() {
   local level="$1"
@@ -126,6 +128,10 @@ build_backend() {
   pip install -e backend
   cd backend
   alembic -c alembic.ini upgrade head
+  if [[ -f "$SYSTEMD_UNIT_SRC" ]]; then
+    sudo install -m 644 "$SYSTEMD_UNIT_SRC" "$SYSTEMD_UNIT_DST"
+    sudo systemctl daemon-reload
+  fi
   sudo systemctl restart "$SERVICE"
 }
 
