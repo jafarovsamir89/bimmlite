@@ -21,6 +21,7 @@ class BridgeManager:
     websocket: WebSocket | None = None
     session_id: str = ""
     authenticated: bool = False
+    last_heartbeat_at: datetime | None = None
     last_error: str = ""
     _lock: asyncio.Lock = field(default_factory=asyncio.Lock)
     _pending: dict[str, asyncio.Future[dict[str, Any]]] = field(default_factory=dict)
@@ -31,18 +32,22 @@ class BridgeManager:
 
     @property
     def connected(self) -> bool:
-        return self.websocket is not None and self.authenticated
+        if self.last_heartbeat_at is None:
+            return False
+        heartbeat_timeout = get_settings().bridge_heartbeat_seconds * 2
+        age = (datetime.now(timezone.utc) - self.last_heartbeat_at).total_seconds()
+        return age <= heartbeat_timeout
 
     async def attach(self, websocket: WebSocket, session_id: str) -> None:
         self.websocket = websocket
         self.session_id = session_id
         self.authenticated = True
+        self.last_heartbeat_at = datetime.now(timezone.utc)
         self.last_error = ""
 
     def detach(self) -> None:
         self.websocket = None
         self.session_id = ""
-        self.authenticated = False
         self.last_error = ""
         for future in self._pending.values():
             if not future.done():

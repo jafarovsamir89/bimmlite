@@ -97,6 +97,7 @@ async def bridge_socket(websocket: WebSocket) -> None:
                 continue
 
             if msg_type == "heartbeat":
+                bridge.last_heartbeat_at = datetime.now(timezone.utc)
                 await telemetry.emit(
                     db_session,
                     level="debug",
