@@ -23,13 +23,14 @@ from app.services.telemetry import TelemetryService
 async def lifespan(app: FastAPI):
     settings = get_settings()
     configure_logging(settings.log_level)
-    if settings.env.lower() == "test":
+    if settings.env.lower() == "test" or settings.database_url.startswith("sqlite"):
         Base.metadata.create_all(bind=engine)
     if not hasattr(app.state, "bridge_manager"):
         app.state.bridge_manager = BridgeManager()
     if not hasattr(app.state, "telemetry"):
         app.state.telemetry = TelemetryService(app)
-    app.state.bridge_manager.set_telemetry(app.state.telemetry)
+    if hasattr(app.state.bridge_manager, "set_telemetry"):
+        app.state.bridge_manager.set_telemetry(app.state.telemetry)
     if not hasattr(app.state, "db_session_factory"):
         from app.core.db import SessionLocal
 

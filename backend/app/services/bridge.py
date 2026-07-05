@@ -29,6 +29,7 @@ class BridgeManager:
     _lock: asyncio.Lock = field(default_factory=asyncio.Lock)
     _pending: dict[str, asyncio.Future[dict[str, Any]]] = field(default_factory=dict)
     _handlers: list[BridgeEventHandler] = field(default_factory=list)
+    _connected_event: asyncio.Event = field(default_factory=asyncio.Event)
 
     def add_handler(self, handler: BridgeEventHandler) -> None:
         self._handlers.append(handler)
@@ -58,12 +59,14 @@ class BridgeManager:
         self.authenticated = True
         self.last_heartbeat_at = datetime.now(timezone.utc)
         self.last_error = ""
+        self._connected_event.set()
 
     def detach(self) -> None:
         self.websocket = None
         self.session_id = ""
         self.authenticated = False
         self.last_error = ""
+        self._connected_event.clear()
         for future in self._pending.values():
             if not future.done():
                 future.cancel()
@@ -78,6 +81,11 @@ class BridgeManager:
         session_id: str | None = None,
     ) -> dict[str, Any]:
         settings = get_settings()
+        if not self.connected or self.websocket is None:
+            try:
+                await asyncio.wait_for(self._connected_event.wait(), timeout=settings.bridge_command_timeout_seconds)
+            except TimeoutError as exc:
+                raise RuntimeError("bridge is not connected") from exc
         if not self.connected or self.websocket is None:
             raise RuntimeError("bridge is not connected")
 

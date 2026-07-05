@@ -11,9 +11,9 @@ router = APIRouter(tags=["health"])
 async def health(request: Request) -> HealthResponse:
     bridge = request.app.state.bridge_manager
     return HealthResponse(
-        bridge_connected=bridge.connected,
-        bridge_attached=bridge.attached,
-        pid=bridge.pid,
-        last_heartbeat_at=bridge.last_heartbeat_at,
-        pending_commands=bridge.pending_commands,
+        bridge_connected=getattr(bridge, "connected", False),
+        bridge_attached=getattr(bridge, "attached", False),
+        pid=getattr(bridge, "pid", 0),
+        last_heartbeat_at=getattr(bridge, "last_heartbeat_at", None),
+        pending_commands=getattr(bridge, "pending_commands", 0),
     )
