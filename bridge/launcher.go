@@ -497,9 +497,40 @@ func buildStatusIcon(connected bool) []byte {
 		}
 	}
 
-	var buf bytes.Buffer
-	_ = png.Encode(&buf, img)
-	return buf.Bytes()
+	if runtime.GOOS != "windows" {
+		var buf bytes.Buffer
+		_ = png.Encode(&buf, img)
+		return buf.Bytes()
+	}
+
+	var pngBuf bytes.Buffer
+	_ = png.Encode(&pngBuf, img)
+	return buildWindowsICO(pngBuf.Bytes(), size, size)
+}
+
+func buildWindowsICO(pngData []byte, width, height int) []byte {
+	if len(pngData) == 0 {
+		return nil
+	}
+	if width <= 0 || height <= 0 {
+		width = 32
+		height = 32
+	}
+
+	var out bytes.Buffer
+	out.Write([]byte{0x00, 0x00, 0x01, 0x00, 0x01, 0x00})
+	out.WriteByte(byte(width))
+	out.WriteByte(byte(height))
+	out.WriteByte(0x00)
+	out.WriteByte(0x00)
+	out.Write([]byte{0x01, 0x00})
+	out.Write([]byte{0x20, 0x00})
+	sizeBytes := uint32(len(pngData))
+	out.Write([]byte{byte(sizeBytes), byte(sizeBytes >> 8), byte(sizeBytes >> 16), byte(sizeBytes >> 24)})
+	offset := uint32(6 + 16)
+	out.Write([]byte{byte(offset), byte(offset >> 8), byte(offset >> 16), byte(offset >> 24)})
+	out.Write(pngData)
+	return out.Bytes()
 }
 
 func openURL(target string) error {
