@@ -269,48 +269,55 @@ func (t *DoIPTransport) Close() error {
 }
 
 func (t *DoIPTransport) request(ctx context.Context, target uint16, uds []byte, message string) ([]byte, error) {
-	if t.conn == nil {
-		if err := t.Connect(ctx); err != nil {
+	for attempt := 0; attempt < 2; attempt++ {
+		if t.conn == nil {
+			if err := t.Connect(ctx); err != nil {
+				return nil, err
+			}
+		}
+		msgType, payload, err := t.sendDiagnostic(ctx, target, uds, message)
+		if err != nil {
+			if strings.Contains(err.Error(), "connection not established") && attempt == 0 {
+				_ = t.Close()
+				continue
+			}
 			return nil, err
 		}
-	}
-	msgType, payload, err := t.sendDiagnostic(ctx, target, uds, message)
-	if err != nil {
-		return nil, err
-	}
-	if msgType != doipPayloadDiagMsg {
-		return nil, fmt.Errorf("unexpected message type 0x%04X", msgType)
-	}
-	if len(payload) < 4 {
-		return nil, errors.New("diagnostic payload too short")
-	}
-	data := payload[4:]
-	for len(data) >= 3 && data[0] == 0x7F {
-		switch data[2] {
-		case 0x78:
-			msgType, payload, err = t.readMessage(ctx)
-			if err != nil {
-				return nil, err
-			}
-			if msgType != doipPayloadDiagMsg || len(payload) < 4 {
-				return nil, fmt.Errorf("unexpected follow-up payload: type=0x%04X data=%X", msgType, payload)
-			}
-			data = payload[4:]
-		case 0x36, 0x37:
-			time.Sleep(11 * time.Second)
-			msgType, payload, err = t.readMessage(ctx)
-			if err != nil {
-				return nil, err
-			}
-			if msgType != doipPayloadDiagMsg || len(payload) < 4 {
-				return nil, fmt.Errorf("unexpected follow-up payload: type=0x%04X data=%X", msgType, payload)
-			}
-			data = payload[4:]
-		default:
-			return nil, fmt.Errorf("nrc 0x%02X: %X", data[2], data)
+		if msgType != doipPayloadDiagMsg {
+			return nil, fmt.Errorf("unexpected message type 0x%04X", msgType)
 		}
+		if len(payload) < 4 {
+			return nil, errors.New("diagnostic payload too short")
+		}
+		data := payload[4:]
+		for len(data) >= 3 && data[0] == 0x7F {
+			switch data[2] {
+			case 0x78:
+				msgType, payload, err = t.readMessage(ctx)
+				if err != nil {
+					return nil, err
+				}
+				if msgType != doipPayloadDiagMsg || len(payload) < 4 {
+					return nil, fmt.Errorf("unexpected follow-up payload: type=0x%04X data=%X", msgType, payload)
+				}
+				data = payload[4:]
+			case 0x36, 0x37:
+				time.Sleep(11 * time.Second)
+				msgType, payload, err = t.readMessage(ctx)
+				if err != nil {
+					return nil, err
+				}
+				if msgType != doipPayloadDiagMsg || len(payload) < 4 {
+					return nil, fmt.Errorf("unexpected follow-up payload: type=0x%04X data=%X", msgType, payload)
+				}
+				data = payload[4:]
+			default:
+				return nil, fmt.Errorf("nrc 0x%02X: %X", data[2], data)
+			}
+		}
+		return data, nil
 	}
-	return data, nil
+	return nil, errors.New("doip connection not established")
 }
 
 func (t *DoIPTransport) sendDiagnostic(ctx context.Context, target uint16, uds []byte, message string) (uint16, []byte, error) {

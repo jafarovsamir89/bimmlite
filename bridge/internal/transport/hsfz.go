@@ -275,33 +275,40 @@ func (t *HSFZTransport) Close() error {
 }
 
 func (t *HSFZTransport) request(ctx context.Context, target uint8, uds []byte, message string) ([]byte, error) {
-	if t.conn == nil {
-		if err := t.Connect(ctx); err != nil {
-			return nil, err
-		}
-	}
-	if err := t.writeFrame(target, uds, message); err != nil {
-		return nil, err
-	}
-	for {
-		_ = t.conn.SetReadDeadline(time.Now().Add(3 * time.Second))
-		source, _, payload, err := t.readFrame()
-		if err != nil {
-			return nil, err
-		}
-		if len(payload) >= 3 && payload[0] == 0x7F {
-			switch payload[2] {
-			case 0x78:
-				continue
-			case 0x36, 0x37:
-				time.Sleep(11 * time.Second)
-				continue
-			default:
-				return nil, fmt.Errorf("nrc 0x%02X from %02X: %X", payload[2], source, payload)
+	for attempt := 0; attempt < 2; attempt++ {
+		if t.conn == nil {
+			if err := t.Connect(ctx); err != nil {
+				return nil, err
 			}
 		}
-		return payload, nil
+		if err := t.writeFrame(target, uds, message); err != nil {
+			if strings.Contains(err.Error(), "connection not established") && attempt == 0 {
+				_ = t.Close()
+				continue
+			}
+			return nil, err
+		}
+		for {
+			_ = t.conn.SetReadDeadline(time.Now().Add(3 * time.Second))
+			source, _, payload, err := t.readFrame()
+			if err != nil {
+				return nil, err
+			}
+			if len(payload) >= 3 && payload[0] == 0x7F {
+				switch payload[2] {
+				case 0x78:
+					continue
+				case 0x36, 0x37:
+					time.Sleep(11 * time.Second)
+					continue
+				default:
+					return nil, fmt.Errorf("nrc 0x%02X from %02X: %X", payload[2], source, payload)
+				}
+			}
+			return payload, nil
+		}
 	}
+	return nil, errors.New("hsfz connection not established")
 }
 
 func (t *HSFZTransport) writeFrame(target uint8, uds []byte, message string) error {
