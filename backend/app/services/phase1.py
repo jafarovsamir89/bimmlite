@@ -116,31 +116,46 @@ class Phase1Service:
                 ecu=str(ecu_name),
                 message="reading DTCs",
             )
-            dtc_result = self._unwrap_bridge_result(
-                await self.bridge.send_command(
-                command="dtc.read",
-                payload={"ecu_address": ecu_address, "ecu_name": ecu_name},
-                trace_id=trace_id,
-                session_id=session_id,
-            )
-            )
-            ecu_dtcs = list(dtc_result.get("dtcs", []))
-            for dtc in ecu_dtcs:
-                if not dtc.get("description"):
-                    dtc["description"] = self.dtc_catalog.describe(str(dtc.get("code", "")), ecu_name=str(ecu_name))
-            dtcs.extend(ecu_dtcs)
-            await self.telemetry.emit(
-                db,
-                level="info",
-                module="phase1",
-                event="dtc.read.done",
-                trace_id=trace_id,
-                session_id=session_id,
-                vin=vin,
-                ecu=str(ecu_name),
-                result=f"{len(ecu_dtcs)} dtcs",
-                message="dtc read completed",
-            )
+            ecu_dtcs: list[dict[str, Any]] = []
+            try:
+                dtc_result = self._unwrap_bridge_result(
+                    await self.bridge.send_command(
+                        command="dtc.read",
+                        payload={"ecu_address": ecu_address, "ecu_name": ecu_name},
+                        trace_id=trace_id,
+                        session_id=session_id,
+                    )
+                )
+                ecu_dtcs = list(dtc_result.get("dtcs", []))
+                for dtc in ecu_dtcs:
+                    if not dtc.get("description"):
+                        dtc["description"] = self.dtc_catalog.describe(str(dtc.get("code", "")), ecu_name=str(ecu_name))
+                dtcs.extend(ecu_dtcs)
+                await self.telemetry.emit(
+                    db,
+                    level="info",
+                    module="phase1",
+                    event="dtc.read.done",
+                    trace_id=trace_id,
+                    session_id=session_id,
+                    vin=vin,
+                    ecu=str(ecu_name),
+                    result=f"{len(ecu_dtcs)} dtcs",
+                    message="dtc read completed",
+                )
+            except Exception as exc:
+                await self.telemetry.emit(
+                    db,
+                    level="warn",
+                    module="phase1",
+                    event="dtc.read.failed",
+                    trace_id=trace_id,
+                    session_id=session_id,
+                    vin=vin,
+                    ecu=str(ecu_name),
+                    error=str(exc),
+                    message="dtc read failed, continuing",
+                )
 
             await self.telemetry.emit(
                 db,
@@ -153,32 +168,46 @@ class Phase1Service:
                 ecu=str(ecu_name),
                 message="reading standard parameters",
             )
-            params_result = self._unwrap_bridge_result(
-                await self.bridge.send_command(
-                command="params.read",
-                payload={
-                    "ecu_address": ecu_address,
-                    "ecu_name": ecu_name,
-                    "dids": dids,
-                },
-                trace_id=trace_id,
-                session_id=session_id,
-            )
-            )
-            ecu_params = list(params_result.get("parameters", []))
-            parameters.extend(ecu_params)
-            await self.telemetry.emit(
-                db,
-                level="info",
-                module="phase1",
-                event="params.read.done",
-                trace_id=trace_id,
-                session_id=session_id,
-                vin=vin,
-                ecu=str(ecu_name),
-                result=f"{len(ecu_params)} parameters",
-                message="parameter read completed",
-            )
+            try:
+                params_result = self._unwrap_bridge_result(
+                    await self.bridge.send_command(
+                        command="params.read",
+                        payload={
+                            "ecu_address": ecu_address,
+                            "ecu_name": ecu_name,
+                            "dids": dids,
+                        },
+                        trace_id=trace_id,
+                        session_id=session_id,
+                    )
+                )
+                ecu_params = list(params_result.get("parameters", []))
+                parameters.extend(ecu_params)
+                await self.telemetry.emit(
+                    db,
+                    level="info",
+                    module="phase1",
+                    event="params.read.done",
+                    trace_id=trace_id,
+                    session_id=session_id,
+                    vin=vin,
+                    ecu=str(ecu_name),
+                    result=f"{len(ecu_params)} parameters",
+                    message="parameter read completed",
+                )
+            except Exception as exc:
+                await self.telemetry.emit(
+                    db,
+                    level="warn",
+                    module="phase1",
+                    event="params.read.failed",
+                    trace_id=trace_id,
+                    session_id=session_id,
+                    vin=vin,
+                    ecu=str(ecu_name),
+                    error=str(exc),
+                    message="parameter read failed, continuing",
+                )
 
         await self.telemetry.emit(
             db,

@@ -408,10 +408,13 @@ func discoveryTargetsForIP(bindIP string) []discoveryProbe {
 }
 
 func parseBMWDiscoveryResponse(packet []byte, ip string) (vehicleCandidate, bool) {
-	if len(packet) < 12 || !bytesEqual(packet[8:12], []byte{0x00, 0x00, 0x00, 0x11}) {
+	if len(packet) < 6 {
 		return vehicleCandidate{}, false
 	}
-	text := string(packet[12:])
+	if !bytesEqual(packet[4:6], []byte{0x00, 0x11}) && !(len(packet) >= 12 && bytesEqual(packet[8:12], []byte{0x00, 0x00, 0x00, 0x11})) {
+		return vehicleCandidate{}, false
+	}
+	text := string(packet)
 	vin := extractBMWVIN(text)
 	if vin == "" && len(packet) >= 29 {
 		vin = sanitizeVIN(string(packet[len(packet)-17:]))
