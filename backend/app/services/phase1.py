@@ -250,15 +250,30 @@ class Phase1Service:
             ecu=ecu_name,
             message="reading DTCs",
         )
-        dtc_result = self._unwrap_bridge_result(
-            await self.bridge.send_command(
-                command="dtc.read",
-                payload={"ecu_address": ecu_address, "ecu_name": ecu_name},
+        ecu_dtcs: list[dict[str, Any]] = []
+        try:
+            dtc_result = self._unwrap_bridge_result(
+                await self.bridge.send_command(
+                    command="dtc.read",
+                    payload={"ecu_address": ecu_address, "ecu_name": ecu_name},
+                    trace_id=trace_id,
+                    session_id=session_id,
+                )
+            )
+            ecu_dtcs = list(dtc_result.get("dtcs", []))
+        except Exception as exc:
+            await self.telemetry.emit(
+                db,
+                level="warn",
+                module="phase1",
+                event="dtc.read.fallback",
                 trace_id=trace_id,
                 session_id=session_id,
+                ecu=ecu_name,
+                error=str(exc),
+                message="falling back to connect-read snapshot for DTCs",
             )
-        )
-        ecu_dtcs = list(dtc_result.get("dtcs", []))
+
         if not ecu_dtcs:
             await self.telemetry.emit(
                 db,
@@ -320,15 +335,30 @@ class Phase1Service:
             ecu=ecu_name,
             message="reading standard parameters",
         )
-        params_result = self._unwrap_bridge_result(
-            await self.bridge.send_command(
-                command="params.read",
-                payload={"ecu_address": ecu_address, "ecu_name": ecu_name, "dids": dids},
+        ecu_params: list[dict[str, Any]] = []
+        try:
+            params_result = self._unwrap_bridge_result(
+                await self.bridge.send_command(
+                    command="params.read",
+                    payload={"ecu_address": ecu_address, "ecu_name": ecu_name, "dids": dids},
+                    trace_id=trace_id,
+                    session_id=session_id,
+                )
+            )
+            ecu_params = list(params_result.get("parameters", []))
+        except Exception as exc:
+            await self.telemetry.emit(
+                db,
+                level="warn",
+                module="phase1",
+                event="params.read.fallback",
                 trace_id=trace_id,
                 session_id=session_id,
+                ecu=ecu_name,
+                error=str(exc),
+                message="falling back to connect-read snapshot for parameters",
             )
-        )
-        ecu_params = list(params_result.get("parameters", []))
+
         if not ecu_params:
             await self.telemetry.emit(
                 db,
