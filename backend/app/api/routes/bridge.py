@@ -34,7 +34,7 @@ async def bridge_socket(websocket: WebSocket) -> None:
             return
 
         authenticated = True
-        await bridge.attach(websocket, session_id=session_id)
+        replaced = await bridge.attach(websocket, session_id=session_id)
         bind_context(trace_id=trace_id, session_id=session_id)
         await telemetry.emit(
             db_session,
@@ -48,6 +48,7 @@ async def bridge_socket(websocket: WebSocket) -> None:
             pid=bridge.pid,
             bridge_attached=bridge.attached,
             pending_commands=bridge.pending_commands,
+            replace=replaced,
         )
         await telemetry.emit(
             db_session,
@@ -69,6 +70,7 @@ async def bridge_socket(websocket: WebSocket) -> None:
             bind_context(trace_id=trace_id, session_id=session_id)
             msg_type = message.get("msg_type")
             payload = message.get("payload", {})
+            bridge.touch_activity()
 
             if msg_type == "log":
                 await telemetry.emit(
@@ -85,6 +87,7 @@ async def bridge_socket(websocket: WebSocket) -> None:
                     payload_hex=str(payload.get("payload_hex", "")),
                     result=str(payload.get("result", "")),
                     error=str(payload.get("error", "")),
+                    pid=bridge.pid,
                 )
                 continue
 
@@ -104,6 +107,7 @@ async def bridge_socket(websocket: WebSocket) -> None:
                     error=str(payload.get("nrc", "")),
                     message=str(payload.get("message", "")),
                     persist=True,
+                    pid=bridge.pid,
                 )
                 continue
 
@@ -112,7 +116,7 @@ async def bridge_socket(websocket: WebSocket) -> None:
                 continue
 
             if msg_type == "heartbeat":
-                bridge.last_heartbeat_at = datetime.now(timezone.utc)
+                bridge.touch_activity()
                 await telemetry.emit(
                     db_session,
                     level="debug",
@@ -155,15 +159,16 @@ async def bridge_socket(websocket: WebSocket) -> None:
                 pending_commands=bridge.pending_commands,
             )
     finally:
-        bridge.detach()
+        owner = bridge.detach(websocket)
         await telemetry.emit(
             db_session,
             level="info",
             module="bridge",
             event="bridge.detach",
-            message="bridge detached from websocket",
+            message="bridge detached from websocket" if owner else "stale websocket ignored",
             persist=True,
             pid=bridge.pid,
+            owner=owner,
             bridge_attached=bridge.attached,
             pending_commands=bridge.pending_commands,
         )

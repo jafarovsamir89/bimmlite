@@ -9,6 +9,7 @@ class HealthResponse(BaseModel):
     status: str = "ok"
     bridge_connected: bool = False
     bridge_attached: bool = False
+    is_alive: bool = False
     pid: int = 0
     last_heartbeat_at: datetime | None = None
     pending_commands: int = 0

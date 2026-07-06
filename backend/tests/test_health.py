@@ -22,6 +22,7 @@ def test_health_endpoint():
         response = client.get("/health")
     assert response.status_code == 200
     assert response.json()["status"] == "ok"
+    assert "is_alive" in response.json()
 
 
 def test_ping_endpoint_uses_shared_trace():

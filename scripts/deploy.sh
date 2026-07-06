@@ -117,6 +117,36 @@ PY
   rm -f "$tmp"
 }
 
+ensure_nginx_ws_bridge_rules() {
+  local site_file
+  site_file="$(sudo grep -R -l -m1 "server_name 34.44.19.28" /etc/nginx/sites-enabled 2>/dev/null || true)"
+  [[ -n "$site_file" ]] || return 0
+
+  local tmp
+  tmp="$(mktemp)"
+  python3 - "$site_file" "$tmp" <<'PY'
+from pathlib import Path
+import re
+import sys
+
+src = Path(sys.argv[1]).read_text()
+
+ws_block = """    location ^~ /ws/bridge {\n        proxy_pass http://127.0.0.1:8000;\n        proxy_http_version 1.1;\n        proxy_set_header Upgrade $http_upgrade;\n        proxy_set_header Connection \"upgrade\";\n        proxy_set_header Host $host;\n        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;\n        proxy_set_header X-Forwarded-Proto $scheme;\n        proxy_read_timeout 120s;\n        proxy_send_timeout 120s;\n    }\n"""
+
+pattern = re.compile(r"    location \^~ /ws/bridge \{.*?\n    \}\n", re.S)
+if pattern.search(src):
+    src = pattern.sub(ws_block, src)
+else:
+    needle = "    location / {\n        try_files $uri /index.html;\n    }\n"
+    if needle in src:
+        src = src.replace(needle, ws_block + "\n" + needle)
+
+Path(sys.argv[2]).write_text(src)
+PY
+  sudo cp "$tmp" "$site_file"
+  rm -f "$tmp"
+}
+
 build_backend() {
   cd "$APP_DIR"
   if [[ ! -d .venv ]]; then
@@ -168,6 +198,7 @@ main() {
   log "INFO" "detected nginx owner_group=$NGINX_OWNER_GROUP"
   sync_nginx_static "$NGINX_ROOT" "$NGINX_OWNER_GROUP"
   ensure_nginx_cache_rules
+  ensure_nginx_ws_bridge_rules
 
   sudo nginx -t
   sudo systemctl reload nginx

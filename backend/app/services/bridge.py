@@ -46,6 +46,14 @@ class BridgeManager:
         return self.websocket is not None
 
     @property
+    def is_alive(self) -> bool:
+        if not self.attached or self.last_heartbeat_at is None:
+            return False
+        settings = get_settings()
+        heartbeat_age = (datetime.now(timezone.utc) - self.last_heartbeat_at).total_seconds()
+        return heartbeat_age <= settings.bridge_heartbeat_seconds * 3
+
+    @property
     def pending_commands(self) -> int:
         return len(self._pending)
 
@@ -53,15 +61,28 @@ class BridgeManager:
     def connected(self) -> bool:
         return self.websocket is not None and self.authenticated
 
-    async def attach(self, websocket: WebSocket, session_id: str) -> None:
+    def touch_activity(self) -> None:
+        self.last_heartbeat_at = datetime.now(timezone.utc)
+
+    async def attach(self, websocket: WebSocket, session_id: str) -> bool:
+        replace = self.websocket is not None and self.websocket is not websocket
+        if replace and self.websocket is not None:
+            try:
+                await self.websocket.close()
+            except Exception:
+                pass
         self.websocket = websocket
         self.session_id = session_id
         self.authenticated = True
-        self.last_heartbeat_at = datetime.now(timezone.utc)
+        self.touch_activity()
         self.last_error = ""
         self._connected_event.set()
+        return replace
 
-    def detach(self) -> None:
+    def detach(self, websocket: WebSocket | None = None) -> bool:
+        owner = websocket is None or websocket is self.websocket
+        if not owner:
+            return False
         self.websocket = None
         self.session_id = ""
         self.authenticated = False
@@ -71,6 +92,7 @@ class BridgeManager:
             if not future.done():
                 future.cancel()
         self._pending.clear()
+        return True
 
     async def send_command(
         self,
@@ -172,6 +194,7 @@ class BridgeManager:
 
     async def handle_incoming(self, raw_message: str) -> dict[str, Any] | None:
         message = json.loads(raw_message)
+        self.touch_activity()
         for handler in self._handlers:
             await handler(message)
         trace_id = message.get("trace_id", "")
