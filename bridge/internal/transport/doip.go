@@ -269,6 +269,11 @@ func (t *DoIPTransport) Close() error {
 }
 
 func (t *DoIPTransport) request(ctx context.Context, target uint16, uds []byte, message string) ([]byte, error) {
+	if t.conn == nil {
+		if err := t.Connect(ctx); err != nil {
+			return nil, err
+		}
+	}
 	msgType, payload, err := t.sendDiagnostic(ctx, target, uds, message)
 	if err != nil {
 		return nil, err

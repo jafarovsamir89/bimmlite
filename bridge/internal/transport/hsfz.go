@@ -275,6 +275,11 @@ func (t *HSFZTransport) Close() error {
 }
 
 func (t *HSFZTransport) request(ctx context.Context, target uint8, uds []byte, message string) ([]byte, error) {
+	if t.conn == nil {
+		if err := t.Connect(ctx); err != nil {
+			return nil, err
+		}
+	}
 	if err := t.writeFrame(target, uds, message); err != nil {
 		return nil, err
 	}
