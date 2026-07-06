@@ -24,8 +24,16 @@ func parseDTCResponse(ecu ECUInfo, raw []byte) []DTCInfo {
 		return nil
 	}
 
-	result := make([]DTCInfo, 0, len(raw)/4)
-	for i := 0; i+3 < len(raw); i += 4 {
+	start := 0
+	if len(raw) > 1 && (len(raw)-1)%4 == 0 {
+		start = 1
+	}
+	if len(raw[start:]) < 4 {
+		return nil
+	}
+
+	result := make([]DTCInfo, 0, len(raw[start:])/4)
+	for i := start; i+3 < len(raw); i += 4 {
 		code := fmt.Sprintf("%02X%02X%02X", raw[i], raw[i+1], raw[i+2])
 		status := decodeDTCStatus(raw[i+3])
 		result = append(result, DTCInfo{
