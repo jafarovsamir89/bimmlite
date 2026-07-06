@@ -63,7 +63,12 @@ async def bridge_socket(websocket: WebSocket) -> None:
         )
 
         while True:
-            raw = await websocket.receive_text()
+            try:
+                raw = await websocket.receive_text()
+            except RuntimeError as exc:
+                if "WebSocket is not connected" in str(exc):
+                    raise WebSocketDisconnect() from exc
+                raise
             message = json.loads(raw)
             trace_id = message.get("trace_id", new_trace_id())
             session_id = message.get("session_id", session_id)
@@ -146,6 +151,21 @@ async def bridge_socket(websocket: WebSocket) -> None:
 
             await bridge.handle_incoming(raw)
     except WebSocketDisconnect:
+        if authenticated:
+            await telemetry.emit(
+                db_session,
+                level="warn",
+                module="bridge",
+                event="bridge.disconnected",
+                message="bridge disconnected",
+                persist=True,
+                pid=bridge.pid,
+                bridge_attached=bridge.attached,
+                pending_commands=bridge.pending_commands,
+            )
+    except RuntimeError as exc:
+        if "WebSocket is not connected" not in str(exc):
+            raise
         if authenticated:
             await telemetry.emit(
                 db_session,
