@@ -4,6 +4,7 @@ import logging
 import sys
 
 import structlog
+from structlog.stdlib import NAME_TO_LEVEL, LEVEL_TO_NAME
 
 from app.core.trace import bind_context
 
@@ -17,6 +18,8 @@ def _trace(self: logging.Logger, message: str, *args: object, **kwargs: object) 
 
 logging.addLevelName(TRACE_LEVEL, "TRACE")
 logging.Logger.trace = _trace  # type: ignore[attr-defined]
+LEVEL_TO_NAME[TRACE_LEVEL] = "trace"
+NAME_TO_LEVEL["trace"] = TRACE_LEVEL
 
 
 def configure_logging(level: str = "INFO") -> None:

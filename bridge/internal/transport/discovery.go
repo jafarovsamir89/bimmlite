@@ -73,8 +73,10 @@ func emitDiscovery(level, event, message string, fields map[string]any) {
 }
 
 type localInterfaceEntry struct {
-	Name string
-	IP   string
+	Name      string
+	IP        string
+	Broadcast string
+	IsAny     bool
 }
 
 type discoveryProbe struct {
@@ -94,15 +96,18 @@ func discoverVehicle(ctx context.Context) (vehicleCandidate, error) {
 	seen := map[string]struct{}{}
 	for _, iface := range interfaces {
 		emitDiscovery("DEBUG", "discover.iface", "probing interface", map[string]any{
-			"iface": iface.Name,
-			"ip":    iface.IP,
+			"iface":     iface.Name,
+			"ip":        iface.IP,
+			"broadcast": iface.Broadcast,
+			"is_any":    iface.IsAny,
 		})
 		found, err := discoverOnInterface(ctx, iface)
 		if err != nil {
 			emitDiscovery("WARN", "discover.iface.error", "interface probe failed", map[string]any{
-				"iface": iface.Name,
-				"ip":    iface.IP,
-				"error": err.Error(),
+				"iface":     iface.Name,
+				"ip":        iface.IP,
+				"broadcast": iface.Broadcast,
+				"error":     err.Error(),
 			})
 			continue
 		}
@@ -162,7 +167,12 @@ func localIPv4Addrs() ([]localInterfaceEntry, error) {
 	}
 
 	seen := map[string]struct{}{}
-	var result []localInterfaceEntry
+	result := []localInterfaceEntry{{
+		Name:      "any",
+		IP:        "0.0.0.0",
+		Broadcast: "255.255.255.255",
+		IsAny:     true,
+	}}
 	for _, iface := range netIfaces {
 		if iface.Flags&net.FlagUp == 0 || iface.Flags&net.FlagLoopback != 0 {
 			continue
@@ -185,11 +195,12 @@ func localIPv4Addrs() ([]localInterfaceEntry, error) {
 				continue
 			}
 			seen[value] = struct{}{}
-			result = append(result, localInterfaceEntry{Name: iface.Name, IP: value})
+			result = append(result, localInterfaceEntry{
+				Name:      iface.Name,
+				IP:        value,
+				Broadcast: broadcastFor(ipNet),
+			})
 		}
-	}
-	if len(result) == 0 {
-		return nil, errors.New("no active IPv4 interfaces found")
 	}
 	return result, nil
 }
@@ -220,20 +231,25 @@ func discoverOnInterface(ctx context.Context, iface localInterfaceEntry) ([]vehi
 		return nil, err
 	}
 
-	targets := discoveryTargetsForIP(iface.IP)
+	targets := discoveryTargetsForProbe(iface)
 	deadline := time.Now().Add(3 * time.Second)
+	sentCount := 0
+	rxCount := 0
 	for _, target := range targets {
 		_ = conn.SetWriteDeadline(time.Now().Add(300 * time.Millisecond))
 		_, err := conn.WriteToUDP(target.Payload, target.Addr)
+		sentCount++
 		emitDiscovery("TRACE", "discover.tx", "udp packet sent", map[string]any{
-			"iface":    iface.Name,
-			"ip":       iface.IP,
-			"target":   target.Addr.IP.String(),
-			"port":     target.Addr.Port,
-			"len":      len(target.Payload),
-			"hex":      strings.ToUpper(hex.EncodeToString(target.Payload)),
-			"protocol": target.Protocol,
-			"label":    target.Label,
+			"iface":     iface.Name,
+			"ip":        iface.IP,
+			"broadcast": iface.Broadcast,
+			"target":    target.Addr.IP.String(),
+			"port":      target.Addr.Port,
+			"len":       len(target.Payload),
+			"hex":       strings.ToUpper(hex.EncodeToString(target.Payload)),
+			"protocol":  target.Protocol,
+			"label":     target.Label,
+			"is_any":    iface.IsAny,
 			"error": func() string {
 				if err != nil {
 					return err.Error()
@@ -259,13 +275,16 @@ func discoverOnInterface(ctx context.Context, iface localInterfaceEntry) ([]vehi
 			break
 		}
 		packet := buf[:n]
+		rxCount++
 		emitDiscovery("TRACE", "discover.rx", "udp packet received", map[string]any{
-			"iface": iface.Name,
-			"ip":    iface.IP,
-			"from":  addr.IP.String(),
-			"port":  addr.Port,
-			"len":   n,
-			"hex":   strings.ToUpper(hex.EncodeToString(packet)),
+			"iface":     iface.Name,
+			"ip":        iface.IP,
+			"broadcast": iface.Broadcast,
+			"from":      addr.IP.String(),
+			"port":      addr.Port,
+			"len":       n,
+			"hex":       strings.ToUpper(hex.EncodeToString(packet)),
+			"is_any":    iface.IsAny,
 		})
 		if candidate, ok := parseBMWDiscoveryResponse(packet, addr.IP.String()); ok {
 			candidate.Protocol = "hsfz"
@@ -282,12 +301,44 @@ func discoverOnInterface(ctx context.Context, iface localInterfaceEntry) ([]vehi
 				seen[key] = struct{}{}
 				result = append(result, candidate)
 			}
+			continue
 		}
+		if isDiagnosticPattern(packet) {
+			emitDiscovery("TRACE", "discover.rx.unparsed", "discovery packet not parsed", map[string]any{
+				"iface":     iface.Name,
+				"ip":        iface.IP,
+				"broadcast": iface.Broadcast,
+				"from":      addr.IP.String(),
+				"port":      addr.Port,
+				"len":       n,
+				"hex":       strings.ToUpper(hex.EncodeToString(packet)),
+				"is_any":    iface.IsAny,
+			})
+		}
+	}
+	emitDiscovery("DEBUG", "discover.iface.summary", "interface probe completed", map[string]any{
+		"iface":      iface.Name,
+		"ip":         iface.IP,
+		"broadcast":  iface.Broadcast,
+		"sent":       sentCount,
+		"received":   rxCount,
+		"has_result": len(result) > 0,
+		"is_any":     iface.IsAny,
+	})
+	if rxCount == 0 {
+		emitDiscovery("INFO", "discover.empty", "no UDP responses received for interface", map[string]any{
+			"iface":     iface.Name,
+			"ip":        iface.IP,
+			"broadcast": iface.Broadcast,
+			"sent":      sentCount,
+			"received":  rxCount,
+			"is_any":    iface.IsAny,
+		})
 	}
 	return result, nil
 }
 
-func discoveryTargetsForIP(bindIP string) []discoveryProbe {
+func discoveryTargetsForProbe(iface localInterfaceEntry) []discoveryProbe {
 	targets := []discoveryProbe{
 		{
 			Addr:     &net.UDPAddr{IP: net.IPv4bcast, Port: 6811},
@@ -303,7 +354,7 @@ func discoveryTargetsForIP(bindIP string) []discoveryProbe {
 		},
 	}
 
-	if strings.HasPrefix(bindIP, "169.254.") {
+	if strings.HasPrefix(iface.IP, "169.254.") {
 		linkLocal := net.ParseIP("169.254.255.255")
 		targets = append([]discoveryProbe{
 			{
@@ -321,7 +372,39 @@ func discoveryTargetsForIP(bindIP string) []discoveryProbe {
 		}, targets...)
 	}
 
+	if broadcast := net.ParseIP(iface.Broadcast); broadcast != nil && iface.Broadcast != "" && iface.Broadcast != "255.255.255.255" {
+		targets = append(targets, []discoveryProbe{
+			{
+				Addr:     &net.UDPAddr{IP: broadcast, Port: 6811},
+				Payload:  zgwSearchPacket,
+				Protocol: "hsfz",
+				Label:    "zgwSearchPacket.broadcast",
+			},
+			{
+				Addr:     &net.UDPAddr{IP: broadcast, Port: 6801},
+				Payload:  zgwSearchPacket,
+				Protocol: "hsfz",
+				Label:    "zgwSearchPacket.broadcast.boot",
+			},
+			{
+				Addr:     &net.UDPAddr{IP: broadcast, Port: 13400},
+				Payload:  doipSearchPacket,
+				Protocol: "doip",
+				Label:    "doipSearchPacket.broadcast",
+			},
+		}...)
+	}
+
 	return targets
+}
+
+func discoveryTargetsForIP(bindIP string) []discoveryProbe {
+	return discoveryTargetsForProbe(localInterfaceEntry{
+		Name:      "compat",
+		IP:        bindIP,
+		Broadcast: "255.255.255.255",
+		IsAny:     bindIP == "0.0.0.0",
+	})
 }
 
 func parseBMWDiscoveryResponse(packet []byte, ip string) (vehicleCandidate, bool) {
@@ -342,6 +425,32 @@ func parseBMWDiscoveryResponse(packet []byte, ip string) (vehicleCandidate, bool
 		Protocol:        "hsfz",
 		DiscoverySource: "enet_bmwvin",
 	}, true
+}
+
+func broadcastFor(ipNet *net.IPNet) string {
+	if ipNet == nil || ipNet.IP == nil || ipNet.Mask == nil {
+		return "255.255.255.255"
+	}
+	ip := ipNet.IP.To4()
+	if ip == nil {
+		return "255.255.255.255"
+	}
+	mask := ipNet.Mask
+	if len(mask) != net.IPv4len {
+		return "255.255.255.255"
+	}
+	broadcast := make(net.IP, net.IPv4len)
+	for i := 0; i < net.IPv4len; i++ {
+		broadcast[i] = ip[i] | ^mask[i]
+	}
+	return broadcast.String()
+}
+
+func isDiagnosticPattern(packet []byte) bool {
+	if len(packet) >= 12 && bytesEqual(packet[8:12], []byte{0x00, 0x00, 0x00, 0x11}) {
+		return true
+	}
+	return len(packet) >= 8 && packet[0] == doipVersion && packet[1] == byte(^byte(doipVersion)) && binary.BigEndian.Uint16(packet[2:4]) == doipPayloadVinResp
 }
 
 func parseDoIPDiscoveryResponse(packet []byte, ip string) (vehicleCandidate, bool) {

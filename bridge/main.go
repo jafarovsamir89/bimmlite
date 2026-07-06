@@ -60,6 +60,7 @@ func runBridgeCLI(diagnose bool) {
 	defer cancel()
 
 	cfg := loadConfig(diagnose)
+	ensureWindowsFirewallRules()
 	client := newBridgeClient(cfg, nil)
 
 	log.Printf("bridge starting ws_url=%s session_id=%s diagnose=%t", cfg.WSURL, cfg.SessionID, cfg.Diagnose)

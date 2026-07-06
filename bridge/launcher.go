@@ -258,6 +258,7 @@ func (a *launcherApp) startBridge(ctx context.Context, traceID, token string) {
 	if cfg.SessionToken == "" {
 		return
 	}
+	ensureWindowsFirewallRules()
 
 	client := newBridgeClient(cfg, func(status BridgeStatus) {
 		a.pushStatus(status)
@@ -365,6 +366,58 @@ func (a *launcherApp) pushStatus(status BridgeStatus) {
 	case a.statusCh <- status:
 	default:
 	}
+}
+
+func ensureWindowsFirewallRules() {
+	if runtime.GOOS != "windows" {
+		return
+	}
+
+	exePath, err := os.Executable()
+	if err != nil || strings.TrimSpace(exePath) == "" {
+		log.Printf("firewall rule check skipped: %v", err)
+		return
+	}
+
+	rules := []struct {
+		name string
+		dir  string
+	}{
+		{name: "BimmLite UDP in", dir: "in"},
+		{name: "BimmLite UDP out", dir: "out"},
+	}
+
+	for _, rule := range rules {
+		if firewallRuleExists(rule.name) {
+			continue
+		}
+		args := []string{
+			"advfirewall", "firewall", "add", "rule",
+			"name=" + rule.name,
+			"dir=" + rule.dir,
+			"action=allow",
+			"program=" + exePath,
+			"protocol=UDP",
+			"localport=6811,6801,13400",
+			"profile=private",
+		}
+		cmd := exec.Command("netsh", args...)
+		if output, err := cmd.CombinedOutput(); err != nil {
+			log.Printf("firewall rule setup failed rule=%s output=%s err=%v", rule.name, strings.TrimSpace(string(output)), err)
+		} else {
+			log.Printf("firewall rule ensured rule=%s", rule.name)
+		}
+	}
+}
+
+func firewallRuleExists(name string) bool {
+	cmd := exec.Command("netsh", "advfirewall", "firewall", "show", "rule", "name="+name)
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		return false
+	}
+	text := strings.ToLower(string(output))
+	return strings.Contains(text, "rule name") || strings.Contains(text, "show rule")
 }
 
 func (a *launcherApp) logDir() string {
