@@ -182,6 +182,9 @@ func (t *HSFZTransport) broadcastScan(ctx context.Context) ([]ECUInfo, error) {
 }
 
 func (t *HSFZTransport) ReadDTC(ctx context.Context, ecu ECUInfo) ([]DTCInfo, error) {
+	if err := t.Close(); err != nil {
+		return nil, err
+	}
 	if err := t.Connect(ctx); err != nil {
 		return nil, err
 	}
@@ -200,6 +203,9 @@ func (t *HSFZTransport) ReadDTC(ctx context.Context, ecu ECUInfo) ([]DTCInfo, er
 }
 
 func (t *HSFZTransport) ReadParameters(ctx context.Context, ecu ECUInfo, dids []string) ([]ParameterInfo, error) {
+	if err := t.Close(); err != nil {
+		return nil, err
+	}
 	if err := t.Connect(ctx); err != nil {
 		return nil, err
 	}
@@ -233,6 +239,9 @@ func (t *HSFZTransport) ReadParameters(ctx context.Context, ecu ECUInfo, dids []
 }
 
 func (t *HSFZTransport) ClearDTC(ctx context.Context, ecu ECUInfo) (map[string]any, error) {
+	if err := t.Close(); err != nil {
+		return nil, err
+	}
 	if err := t.Connect(ctx); err != nil {
 		return nil, err
 	}
@@ -254,6 +263,9 @@ func (t *HSFZTransport) ClearDTC(ctx context.Context, ecu ECUInfo) (map[string]a
 }
 
 func (t *HSFZTransport) TesterPresent(ctx context.Context, ecu ECUInfo) error {
+	if err := t.Close(); err != nil {
+		return err
+	}
 	if err := t.Connect(ctx); err != nil {
 		return err
 	}

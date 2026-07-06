@@ -175,6 +175,9 @@ func (t *DoIPTransport) ScanECUs(ctx context.Context) ([]ECUInfo, error) {
 }
 
 func (t *DoIPTransport) ReadDTC(ctx context.Context, ecu ECUInfo) ([]DTCInfo, error) {
+	if err := t.Close(); err != nil {
+		return nil, err
+	}
 	if err := t.Connect(ctx); err != nil {
 		return nil, err
 	}
@@ -193,6 +196,9 @@ func (t *DoIPTransport) ReadDTC(ctx context.Context, ecu ECUInfo) ([]DTCInfo, er
 }
 
 func (t *DoIPTransport) ReadParameters(ctx context.Context, ecu ECUInfo, dids []string) ([]ParameterInfo, error) {
+	if err := t.Close(); err != nil {
+		return nil, err
+	}
 	if err := t.Connect(ctx); err != nil {
 		return nil, err
 	}
@@ -227,6 +233,9 @@ func (t *DoIPTransport) ReadParameters(ctx context.Context, ecu ECUInfo, dids []
 }
 
 func (t *DoIPTransport) ClearDTC(ctx context.Context, ecu ECUInfo) (map[string]any, error) {
+	if err := t.Close(); err != nil {
+		return nil, err
+	}
 	if err := t.Connect(ctx); err != nil {
 		return nil, err
 	}
@@ -248,6 +257,9 @@ func (t *DoIPTransport) ClearDTC(ctx context.Context, ecu ECUInfo) (map[string]a
 }
 
 func (t *DoIPTransport) TesterPresent(ctx context.Context, ecu ECUInfo) error {
+	if err := t.Close(); err != nil {
+		return err
+	}
 	if err := t.Connect(ctx); err != nil {
 		return err
 	}
