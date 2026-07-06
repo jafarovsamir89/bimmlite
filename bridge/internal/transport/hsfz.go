@@ -189,9 +189,6 @@ func (t *HSFZTransport) ReadDTC(ctx context.Context, ecu ECUInfo) ([]DTCInfo, er
 	if err != nil {
 		return nil, err
 	}
-	if err := t.ensureExtendedSession(ctx, uint8(addr)); err != nil {
-		return nil, err
-	}
 	for _, mask := range [][]byte{{0x2F}, {0xFF}, {0x0C}} {
 		resp, err := t.request(ctx, uint8(addr), append([]byte{0x19, 0x02}, mask...), "dtc.read")
 		if err != nil {
@@ -201,7 +198,7 @@ func (t *HSFZTransport) ReadDTC(ctx context.Context, ecu ECUInfo) ([]DTCInfo, er
 			return parseDTCResponse(ecu, resp[3:]), nil
 		}
 	}
-	return nil, fmt.Errorf("unexpected DTC response: %X", []byte{0x19, 0x02, 0x2F})
+	return []DTCInfo{}, nil
 }
 
 func (t *HSFZTransport) ReadParameters(ctx context.Context, ecu ECUInfo, dids []string) ([]ParameterInfo, error) {
@@ -210,9 +207,6 @@ func (t *HSFZTransport) ReadParameters(ctx context.Context, ecu ECUInfo, dids []
 	}
 	addr, err := parseMaybeHexU16(ecu.Address)
 	if err != nil {
-		return nil, err
-	}
-	if err := t.ensureExtendedSession(ctx, uint8(addr)); err != nil {
 		return nil, err
 	}
 	params := make([]ParameterInfo, 0, len(dids))
@@ -248,9 +242,6 @@ func (t *HSFZTransport) ClearDTC(ctx context.Context, ecu ECUInfo) (map[string]a
 	if err != nil {
 		return nil, err
 	}
-	if err := t.ensureExtendedSession(ctx, uint8(addr)); err != nil {
-		return nil, err
-	}
 	resp, err := t.request(ctx, uint8(addr), []byte{0x14, 0xFF, 0xFF, 0xFF}, "dtc.clear")
 	if err != nil {
 		return nil, err
@@ -271,9 +262,6 @@ func (t *HSFZTransport) TesterPresent(ctx context.Context, ecu ECUInfo) error {
 	addr, err := parseMaybeHexU16(ecu.Address)
 	if err != nil {
 		addr = uint16(t.target)
-	}
-	if err := t.ensureExtendedSession(ctx, uint8(addr)); err != nil {
-		return err
 	}
 	_, err = t.request(ctx, uint8(addr), []byte{0x3E, 0x80}, "tester.present")
 	return err
@@ -323,17 +311,6 @@ func (t *HSFZTransport) request(ctx context.Context, target uint8, uds []byte, m
 		}
 	}
 	return nil, errors.New("hsfz connection not established")
-}
-
-func (t *HSFZTransport) ensureExtendedSession(ctx context.Context, target uint8) error {
-	resp, err := t.request(ctx, target, []byte{0x10, 0x03}, "session.extended")
-	if err != nil {
-		return err
-	}
-	if len(resp) < 2 || resp[0] != 0x50 || resp[1] != 0x03 {
-		return fmt.Errorf("unexpected session response: %X", resp)
-	}
-	return nil
 }
 
 func (t *HSFZTransport) writeFrame(target uint8, uds []byte, message string) error {
