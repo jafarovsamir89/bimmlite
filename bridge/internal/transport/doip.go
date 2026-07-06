@@ -220,6 +220,24 @@ func (t *DoIPTransport) ReadParameters(ctx context.Context, ecu ECUInfo, dids []
 	return params, nil
 }
 
+func (t *DoIPTransport) ClearDTC(ctx context.Context, ecu ECUInfo) (map[string]any, error) {
+	addr, err := parseMaybeHexU16(ecu.Address)
+	if err != nil {
+		return nil, err
+	}
+	resp, err := t.request(ctx, addr, []byte{0x14, 0xFF, 0xFF, 0xFF}, "dtc.clear")
+	if err != nil {
+		return nil, err
+	}
+	if len(resp) == 0 || resp[0] != 0x54 {
+		return nil, fmt.Errorf("unexpected clear DTC response: %X", resp)
+	}
+	return map[string]any{
+		"result": "cleared",
+		"raw":    encodeHex(resp),
+	}, nil
+}
+
 func (t *DoIPTransport) TesterPresent(ctx context.Context, ecu ECUInfo) error {
 	addr, err := parseMaybeHexU16(ecu.Address)
 	if err != nil {

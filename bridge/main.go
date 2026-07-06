@@ -391,6 +391,18 @@ func (b *BridgeClient) executeTransport(ctx context.Context, conn *websocket.Con
 			return nil, err
 		}
 		return map[string]any{"ecu": ecu, "dtcs": dtcs}, nil
+	case "dtc.clear":
+		ecu := transport.ECUInfo{
+			Address:  stringFrom(args["ecu_address"]),
+			Name:     stringFrom(args["ecu_name"]),
+			Protocol: b.transport.Name(),
+			Present:  true,
+		}
+		result, err := b.transport.ClearDTC(ctx, ecu)
+		if err != nil {
+			return nil, err
+		}
+		return map[string]any{"ecu": ecu, "result": result}, nil
 	case "params.read":
 		ecu := transport.ECUInfo{
 			Address:  stringFrom(args["ecu_address"]),

@@ -60,6 +60,26 @@ class Phase1SnapshotResponse(BaseModel):
     snapshot: Phase1Snapshot
 
 
+class EcuActionRequest(BaseModel):
+    ecu_address: str
+    ecu_name: str = ""
+    dids: list[str] = Field(default_factory=list)
+
+
+class ClearDtcRequest(BaseModel):
+    ecu_address: str
+    ecu_name: str = ""
+    confirmed: bool = False
+
+
+class EcuActionResponse(BaseModel):
+    trace_id: str
+    session_id: str
+    ecu_address: str
+    ecu_name: str = ""
+    result: dict[str, object] = Field(default_factory=dict)
+
+
 class LogItem(BaseModel):
     ts: str
     level: str

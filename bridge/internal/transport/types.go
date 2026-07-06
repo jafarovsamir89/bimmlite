@@ -59,6 +59,7 @@ type AdapterTransport interface {
 	ScanECUs(ctx context.Context) ([]ECUInfo, error)
 	ReadDTC(ctx context.Context, ecu ECUInfo) ([]DTCInfo, error)
 	ReadParameters(ctx context.Context, ecu ECUInfo, dids []string) ([]ParameterInfo, error)
+	ClearDTC(ctx context.Context, ecu ECUInfo) (map[string]any, error)
 	TesterPresent(ctx context.Context, ecu ECUInfo) error
 	Close() error
 	SetFrameSink(FrameSink)

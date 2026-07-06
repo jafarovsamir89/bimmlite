@@ -150,6 +150,15 @@ func (a *AutoTransport) ReadParameters(ctx context.Context, ecu ECUInfo, dids []
 	return a.active.ReadParameters(ctx, ecu, dids)
 }
 
+func (a *AutoTransport) ClearDTC(ctx context.Context, ecu ECUInfo) (map[string]any, error) {
+	if a.active == nil {
+		if err := a.Connect(ctx); err != nil {
+			return nil, err
+		}
+	}
+	return a.active.ClearDTC(ctx, ecu)
+}
+
 func (a *AutoTransport) TesterPresent(ctx context.Context, ecu ECUInfo) error {
 	if a.active == nil {
 		if err := a.Connect(ctx); err != nil {

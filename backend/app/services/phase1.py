@@ -229,6 +229,139 @@ class Phase1Service:
             parameters=parameters,
         )
 
+    async def read_ecu_dtc(
+        self,
+        db: Session,
+        *,
+        ecu_address: str,
+        ecu_name: str = "",
+        trace_id: str | None = None,
+        session_id: str | None = None,
+    ) -> list[dict[str, Any]]:
+        trace_id = trace_id or current_trace_id()
+        session_id = session_id or current_session_id()
+        await self.telemetry.emit(
+            db,
+            level="info",
+            module="phase1",
+            event="dtc.read.start",
+            trace_id=trace_id,
+            session_id=session_id,
+            ecu=ecu_name,
+            message="reading DTCs",
+        )
+        dtc_result = self._unwrap_bridge_result(
+            await self.bridge.send_command(
+                command="dtc.read",
+                payload={"ecu_address": ecu_address, "ecu_name": ecu_name},
+                trace_id=trace_id,
+                session_id=session_id,
+            )
+        )
+        ecu_dtcs = list(dtc_result.get("dtcs", []))
+        for dtc in ecu_dtcs:
+            if not dtc.get("description"):
+                dtc["description"] = self.dtc_catalog.describe(str(dtc.get("code", "")), ecu_name=ecu_name)
+        await self.telemetry.emit(
+            db,
+            level="info",
+            module="phase1",
+            event="dtc.read.done",
+            trace_id=trace_id,
+            session_id=session_id,
+            ecu=ecu_name,
+            result=f"{len(ecu_dtcs)} dtcs",
+            message="dtc read completed",
+        )
+        return ecu_dtcs
+
+    async def read_ecu_parameters(
+        self,
+        db: Session,
+        *,
+        ecu_address: str,
+        ecu_name: str = "",
+        dids: list[str] | None = None,
+        trace_id: str | None = None,
+        session_id: str | None = None,
+    ) -> list[dict[str, Any]]:
+        trace_id = trace_id or current_trace_id()
+        session_id = session_id or current_session_id()
+        dids = dids or DEFAULT_PARAMETER_DIDS
+        await self.telemetry.emit(
+            db,
+            level="info",
+            module="phase1",
+            event="params.read.start",
+            trace_id=trace_id,
+            session_id=session_id,
+            ecu=ecu_name,
+            message="reading standard parameters",
+        )
+        params_result = self._unwrap_bridge_result(
+            await self.bridge.send_command(
+                command="params.read",
+                payload={"ecu_address": ecu_address, "ecu_name": ecu_name, "dids": dids},
+                trace_id=trace_id,
+                session_id=session_id,
+            )
+        )
+        ecu_params = list(params_result.get("parameters", []))
+        await self.telemetry.emit(
+            db,
+            level="info",
+            module="phase1",
+            event="params.read.done",
+            trace_id=trace_id,
+            session_id=session_id,
+            ecu=ecu_name,
+            result=f"{len(ecu_params)} parameters",
+            message="parameter read completed",
+        )
+        return ecu_params
+
+    async def clear_ecu_dtc(
+        self,
+        db: Session,
+        *,
+        ecu_address: str,
+        ecu_name: str = "",
+        trace_id: str | None = None,
+        session_id: str | None = None,
+    ) -> dict[str, Any]:
+        trace_id = trace_id or current_trace_id()
+        session_id = session_id or current_session_id()
+        await self.telemetry.emit(
+            db,
+            level="warn",
+            module="phase1",
+            event="dtc.clear.start",
+            trace_id=trace_id,
+            session_id=session_id,
+            ecu=ecu_name,
+            message="clearing DTCs",
+        )
+        result = self._unwrap_bridge_result(
+            await self.bridge.send_command(
+                command="dtc.clear",
+                payload={"ecu_address": ecu_address, "ecu_name": ecu_name},
+                trace_id=trace_id,
+                session_id=session_id,
+            )
+        )
+        await self.telemetry.emit(
+            db,
+            level="warn",
+            module="phase1",
+            event="dtc.clear.done",
+            trace_id=trace_id,
+            session_id=session_id,
+            ecu=ecu_name,
+            result=str(result.get("result", "cleared")),
+            message="dtc clear completed",
+        )
+        return result
+
     @staticmethod
     def _unwrap_bridge_result(message: dict[str, Any]) -> dict[str, Any]:
         payload = message.get("payload", {})
