@@ -223,7 +223,7 @@ class Phase1Service:
         return Phase1Snapshot(
             protocol=protocol,
             vin=vin,
-            battery_voltage=float(battery_voltage) if battery_voltage is not None else None,
+            battery_voltage=float(battery_voltage) if battery_voltage is not None and float(battery_voltage) > 0 else None,
             ecus=ecus,
             dtcs=dtcs,
             parameters=parameters,

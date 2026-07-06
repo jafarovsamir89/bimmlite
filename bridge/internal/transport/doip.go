@@ -175,9 +175,6 @@ func (t *DoIPTransport) ScanECUs(ctx context.Context) ([]ECUInfo, error) {
 }
 
 func (t *DoIPTransport) ReadDTC(ctx context.Context, ecu ECUInfo) ([]DTCInfo, error) {
-	if err := t.Close(); err != nil {
-		return nil, err
-	}
 	if err := t.Connect(ctx); err != nil {
 		return nil, err
 	}
@@ -185,25 +182,30 @@ func (t *DoIPTransport) ReadDTC(ctx context.Context, ecu ECUInfo) ([]DTCInfo, er
 	if err != nil {
 		return nil, err
 	}
-	resp, err := t.request(ctx, addr, []byte{0x19, 0x02, 0x2F}, "dtc.read")
-	if err != nil {
+	if err := t.ensureExtendedSession(ctx, addr); err != nil {
 		return nil, err
 	}
-	if len(resp) < 3 || resp[0] != 0x59 || resp[1] != 0x02 {
-		return nil, fmt.Errorf("unexpected DTC response: %X", resp)
+	for _, mask := range [][]byte{{0x2F}, {0xFF}, {0x0C}} {
+		resp, err := t.request(ctx, addr, append([]byte{0x19, 0x02}, mask...), "dtc.read")
+		if err != nil {
+			return nil, err
+		}
+		if len(resp) >= 3 && resp[0] == 0x59 && resp[1] == 0x02 {
+			return parseDTCResponse(ecu, resp[3:]), nil
+		}
 	}
-	return parseDTCResponse(ecu, resp[3:]), nil
+	return nil, fmt.Errorf("unexpected DTC response: %X", []byte{0x19, 0x02, 0x2F})
 }
 
 func (t *DoIPTransport) ReadParameters(ctx context.Context, ecu ECUInfo, dids []string) ([]ParameterInfo, error) {
-	if err := t.Close(); err != nil {
-		return nil, err
-	}
 	if err := t.Connect(ctx); err != nil {
 		return nil, err
 	}
 	addr, err := parseMaybeHexU16(ecu.Address)
 	if err != nil {
+		return nil, err
+	}
+	if err := t.ensureExtendedSession(ctx, addr); err != nil {
 		return nil, err
 	}
 
@@ -233,14 +235,14 @@ func (t *DoIPTransport) ReadParameters(ctx context.Context, ecu ECUInfo, dids []
 }
 
 func (t *DoIPTransport) ClearDTC(ctx context.Context, ecu ECUInfo) (map[string]any, error) {
-	if err := t.Close(); err != nil {
-		return nil, err
-	}
 	if err := t.Connect(ctx); err != nil {
 		return nil, err
 	}
 	addr, err := parseMaybeHexU16(ecu.Address)
 	if err != nil {
+		return nil, err
+	}
+	if err := t.ensureExtendedSession(ctx, addr); err != nil {
 		return nil, err
 	}
 	resp, err := t.request(ctx, addr, []byte{0x14, 0xFF, 0xFF, 0xFF}, "dtc.clear")
@@ -257,15 +259,15 @@ func (t *DoIPTransport) ClearDTC(ctx context.Context, ecu ECUInfo) (map[string]a
 }
 
 func (t *DoIPTransport) TesterPresent(ctx context.Context, ecu ECUInfo) error {
-	if err := t.Close(); err != nil {
-		return err
-	}
 	if err := t.Connect(ctx); err != nil {
 		return err
 	}
 	addr, err := parseMaybeHexU16(ecu.Address)
 	if err != nil {
 		addr = t.target
+	}
+	if err := t.ensureExtendedSession(ctx, addr); err != nil {
+		return err
 	}
 	_, err = t.request(ctx, addr, []byte{0x3E, 0x80}, "tester.present")
 	return err
@@ -330,6 +332,17 @@ func (t *DoIPTransport) request(ctx context.Context, target uint16, uds []byte, 
 		return data, nil
 	}
 	return nil, errors.New("doip connection not established")
+}
+
+func (t *DoIPTransport) ensureExtendedSession(ctx context.Context, target uint16) error {
+	msgType, payload, err := t.sendDiagnostic(ctx, target, []byte{0x10, 0x03}, "session.extended")
+	if err != nil {
+		return err
+	}
+	if msgType != doipPayloadDiagMsg || len(payload) < 6 || payload[4] != 0x50 || payload[5] != 0x03 {
+		return fmt.Errorf("unexpected session response: type=0x%04X payload=%X", msgType, payload)
+	}
+	return nil
 }
 
 func (t *DoIPTransport) sendDiagnostic(ctx context.Context, target uint16, uds []byte, message string) (uint16, []byte, error) {

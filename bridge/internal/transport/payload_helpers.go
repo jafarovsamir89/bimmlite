@@ -25,8 +25,8 @@ func parseDTCResponse(ecu ECUInfo, raw []byte) []DTCInfo {
 	}
 
 	start := 0
-	if len(raw) > 1 && (len(raw)-1)%4 == 0 {
-		start = 1
+	for start < len(raw) && len(raw[start:])%4 != 0 {
+		start++
 	}
 	if len(raw[start:]) < 4 {
 		return nil
