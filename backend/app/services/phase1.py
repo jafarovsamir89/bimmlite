@@ -283,19 +283,16 @@ class Phase1Service:
                 trace_id=trace_id,
                 session_id=session_id,
                 ecu=ecu_name,
-                message="falling back to connect-read snapshot for DTCs",
+                message="falling back to cached connect-read snapshot for DTCs",
             )
-            snapshot = await self.connect_and_read(
-                db,
-                trace_id=trace_id,
-                session_id=session_id,
-            )
-            ecu_dtcs = [
-                dtc
-                for dtc in snapshot.dtcs
-                if str(dtc.ecu_address).upper() == str(ecu_address).upper()
-                or (ecu_name and str(dtc.ecu_name) == ecu_name)
-            ]
+            snapshot = getattr(self.request.app.state, "last_phase1_snapshot", None)
+            if snapshot is not None:
+                ecu_dtcs = [
+                    dtc
+                    for dtc in snapshot.dtcs
+                    if str(dtc.ecu_address).upper() == str(ecu_address).upper()
+                    or (ecu_name and str(dtc.ecu_name) == ecu_name)
+                ]
         for dtc in ecu_dtcs:
             if not dtc.get("description"):
                 dtc["description"] = self.dtc_catalog.describe(str(dtc.get("code", "")), ecu_name=ecu_name)
@@ -356,7 +353,7 @@ class Phase1Service:
                 session_id=session_id,
                 ecu=ecu_name,
                 error=str(exc),
-                message="falling back to connect-read snapshot for parameters",
+                message="falling back to cached connect-read snapshot for parameters",
             )
 
         if not ecu_params:
@@ -368,20 +365,16 @@ class Phase1Service:
                 trace_id=trace_id,
                 session_id=session_id,
                 ecu=ecu_name,
-                message="falling back to connect-read snapshot for parameters",
+                message="falling back to cached connect-read snapshot for parameters",
             )
-            snapshot = await self.connect_and_read(
-                db,
-                trace_id=trace_id,
-                session_id=session_id,
-                dids=dids,
-            )
-            ecu_params = [
-                param
-                for param in snapshot.parameters
-                if str(param.ecu_address).upper() == str(ecu_address).upper()
-                or (ecu_name and str(param.ecu_name) == ecu_name)
-            ]
+            snapshot = getattr(self.request.app.state, "last_phase1_snapshot", None)
+            if snapshot is not None:
+                ecu_params = [
+                    param
+                    for param in snapshot.parameters
+                    if str(param.ecu_address).upper() == str(ecu_address).upper()
+                    or (ecu_name and str(param.ecu_name) == ecu_name)
+                ]
         await self.telemetry.emit(
             db,
             level="info",

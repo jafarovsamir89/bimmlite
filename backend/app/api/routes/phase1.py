@@ -17,6 +17,7 @@ async def connect_read(request: Request, db: Session = Depends(get_db)) -> Phase
     trace_id = current_trace_id()
     session_id = current_session_id()
     snapshot = await service.connect_and_read(db, trace_id=trace_id, session_id=session_id)
+    request.app.state.last_phase1_snapshot = snapshot
     return Phase1SnapshotResponse(trace_id=trace_id, session_id=session_id, snapshot=snapshot)
 
 
